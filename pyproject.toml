@@ -1,0 +1,17 @@
+[tool.poetry]
+name = "snakeia"
+version = "0.1.0"
+description = ""
+authors = ["Kenneth Obando"]
+readme = "README.md"
+
+[tool.poetry.dependencies]
+python = "^3.13"
+numpy = "^2.2.4"
+pygame = "^2.6.1"
+matplotlib = "^3.10.1"
+
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
