@@ -707,7 +707,7 @@ class GeneticAlgorithm:
         plt.show()
     
     def demo_best_agent(self, agent):
-        """Demuestra el mejor agente en una partida con información de diagnóstico"""
+        """Demuestra el mejor agente en una partida"""
         # Crear un juego con velocidad reducida para la demostración
         game = SnakeGame(ai_control=True)
         done = False
@@ -717,160 +717,49 @@ class GeneticAlgorithm:
         comida_encontrada = 0
         
         # Usar una velocidad de actualización más lenta para mejor visualización
-        pause_time = 0.2  # Pausa más larga para mejor visualización
+        pause_time = 0.1  # Pausa para mejor visualización
         
         # Reiniciar historial de acciones para la demostración
         agent.recent_actions = []
         
-        print("\nIniciando demostración del mejor agente con diagnóstico detallado...")
+        print("\nIniciando demostración del mejor agente...")
         print("(Observar comportamiento - el juego termina al chocar, NO se reinicia automáticamente)")
-        
-        # Para visualizar el tablero
-        def print_board_state():
-            # Creamos una representación del tablero
-            grid_width = game.grid_width
-            grid_height = game.grid_height
-            board = [[' ' for _ in range(grid_width)] for _ in range(grid_height)]
-            
-            # Marcar comida
-            food_x = int(game.food.x // BLOCK_SIZE)
-            food_y = int(game.food.y // BLOCK_SIZE)
-            if 0 <= food_x < grid_width and 0 <= food_y < grid_height:
-                board[food_y][food_x] = 'F'
-                
-            # Marcar serpiente
-            for segment in game.snake:
-                seg_x = int(segment.x // BLOCK_SIZE)
-                seg_y = int(segment.y // BLOCK_SIZE)
-                if 0 <= seg_x < grid_width and 0 <= seg_y < grid_height:
-                    board[seg_y][seg_x] = 'S'
-            
-            # Marcar cabeza
-            head_x = int(game.head.x // BLOCK_SIZE)
-            head_y = int(game.head.y // BLOCK_SIZE)
-            if 0 <= head_x < grid_width and 0 <= head_y < grid_height:
-                board[head_y][head_x] = 'H'
-                
-            # Imprimir tablero
-            print("\nEstado del tablero:")
-            print(" " + "-" * (grid_width * 2 + 1))
-            for row in board:
-                print("|", end="")
-                for cell in row:
-                    print(f" {cell}", end="")
-                print(" |")
-            print(" " + "-" * (grid_width * 2 + 1))
-            
-            # Mostrar dirección actual
-            direction_str = {
-                Direction.RIGHT: "→",
-                Direction.LEFT: "←",
-                Direction.UP: "↑",
-                Direction.DOWN: "↓"
-            }.get(game.direction, "?")
-            
-            print(f"Dirección: {direction_str}")
-            
-            # Distancia a la comida
-            dist_x = abs(game.head.x - game.food.x) // BLOCK_SIZE
-            dist_y = abs(game.head.y - game.food.y) // BLOCK_SIZE
-            manhattan_dist = dist_x + dist_y
-            print(f"Distancia a la comida: {manhattan_dist} casillas (x:{dist_x}, y:{dist_y})")
-            
-            # Sensores de peligro
-            state = game.get_state()
-            print(f"Sensores de peligro: Adelante={state[0]}, Derecha={state[1]}, Izquierda={state[2]}")
-            
-            # Dirección relativa de la comida
-            food_dirs = state[7:11]
-            food_dir_str = ""
-            if food_dirs[0]: food_dir_str += "izquierda "
-            if food_dirs[1]: food_dir_str += "derecha "
-            if food_dirs[2]: food_dir_str += "arriba "
-            if food_dirs[3]: food_dir_str += "abajo "
-            print(f"Comida: {food_dir_str}")
-        
-        # Mostrar tablero inicial
-        print_board_state()
-        
-        # Historial de posiciones para detectar estancamiento
-        position_history = []
-        stuck_threshold = 10  # Número de posiciones repetidas para considerarse estancado
         
         while not done and steps < max_steps:
             # Obtener estado y acción
             state = game.get_state()
-            
-            # Calcular valores Q para cada acción
-            q_values = np.dot(state, agent.weights)
-            
-            # Obtener acción
             action = agent.get_action(state)
-            
-            # Guardar posición actual para detectar estancamiento
-            current_pos = (game.head.x, game.head.y)
-            position_history.append(current_pos)
-            if len(position_history) > stuck_threshold:
-                position_history.pop(0)
             
             # Ejecutar acción
             prev_score = score
-            done, score, reward = game.play_step(action)
+            done, score, _ = game.play_step(action)
             
             # Verificar si encontró comida
             if score > prev_score:
                 comida_encontrada += 1
                 print(f"\n¡COMIDA ENCONTRADA! Total: {comida_encontrada}")
-                # Mostrar tablero cuando encuentra comida
-                print_board_state()
             
             # Pausa para visualización
             time.sleep(pause_time)
             steps += 1
             
-            # Mostrar información detallada cada 20 pasos
-            if steps % 20 == 0:
-                print(f"\nPaso: {steps}, Puntuación: {score}")
-                action_names = ["Recto", "Derecha", "Izquierda"]
-                print(f"Acción: {action_names[action]} (Q-values: {q_values.round(2)})")
-                print_board_state()
-                
-            # Verificar si hay un patrón cíclico y mostrarlo
-            if len(agent.recent_actions) >= 6 and agent._check_for_cycles():
-                print(f"\nPatrón cíclico detectado: {agent.recent_actions[-6:]}")
-                # Mostrar estado del tablero cuando se detecta un ciclo
-                print_board_state()
-                
-            # Verificar estancamiento (misma posición repetida)
-            if len(position_history) >= stuck_threshold:
-                if position_history.count(current_pos) >= stuck_threshold // 2:
-                    print(f"\n¡ALERTA! Serpiente estancada en la misma posición (x:{current_pos[0]//BLOCK_SIZE}, y:{current_pos[1]//BLOCK_SIZE})")
-                    print_board_state()
+            # Mostrar información cada 50 pasos
+            if steps % 50 == 0:
+                print(f"Paso: {steps}, Puntuación: {score}")
         
         # Mostrar resumen al finalizar
-        print("\n" + "=" * 50)
-        print("RESUMEN DE LA DEMOSTRACIÓN:")
+        print("\n" + "=" * 30)
+        print("RESUMEN:")
         print(f"Pasos totales: {steps}")
         print(f"Puntuación final: {score}")
         print(f"Comida encontrada: {comida_encontrada}")
         
         if steps >= max_steps:
             print("Demostración finalizada por límite de pasos.")
-        elif done:
-            if game._is_collision():
-                # Mostrar dónde chocó
-                collision_type = ""
-                if game.head.x < 0 or game.head.x >= game.w:
-                    collision_type = "pared lateral"
-                elif game.head.y < 0 or game.head.y >= game.h:
-                    collision_type = "pared superior/inferior"
-                elif game.head in game.snake[1:]:
-                    collision_type = "su propio cuerpo"
-                print(f"La serpiente chocó con: {collision_type}")
-            else:
-                print("Demostración finalizada por otro motivo.")
+        elif done and game._is_collision():
+            print("La serpiente chocó y el juego terminó.")
                 
-        print("=" * 50)
+        print("=" * 30)
             
         return score
 
@@ -890,15 +779,14 @@ def play_human():
 def train_and_play_ai():
     """Entrena un agente con algoritmo genético y lo demuestra"""
     # Parámetros del algoritmo genético optimizados para aprendizaje eficiente
-    population_size = 70  # Aumentar para mayor diversidad
-    num_generations = 30  # Reducir para entrenar más rápido
+    population_size = 70  # Mayor diversidad de agentes
+    num_generations = 30  # Generaciones suficientes para aprender
     mutation_rate = 0.25  # Mayor mutación para evitar mínimos locales
     crossover_rate = 0.85 # Mayor crossover para combinar buenas características
     elite_size = 5        # Preservar a los 5 mejores
     
     print(f"Iniciando entrenamiento con {population_size} agentes durante {num_generations} generaciones...")
     print("(Esto puede tomar varios minutos, por favor espera)")
-    print("Se ha mejorado el algoritmo para evitar comportamientos cíclicos")
     
     # Crear y ejecutar algoritmo genético
     ga = GeneticAlgorithm(
@@ -917,7 +805,6 @@ def train_and_play_ai():
     
     # Demostrar mejor agente
     print("\nDemostrando mejor agente...")
-    print("(La serpiente se moverá más lento para mejor visualización)")
     best_score = ga.demo_best_agent(best_agent)
     
     # Preguntar si quiere jugar de nuevo con el mismo agente
