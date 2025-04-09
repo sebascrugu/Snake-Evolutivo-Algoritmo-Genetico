@@ -7,6 +7,7 @@ import matplotlib.pyplot as plt
 from collections import namedtuple
 from enum import Enum
 import time
+import builtins
 
 import pygame
 
@@ -44,7 +45,7 @@ BOARD_SIZE = (20, 20)  # Tamaño del tablero en celdas (ancho, alto)
 
 class SnakeGame:
 
-    def __init__(self, width=None, height=None, ai_control=False):
+    def __init__(self, width=None, height=None, ai_control=False, training_mode=False, verbose_debug=False):
         # Configuración del tamaño del tablero
         if width is None or height is None:
             # Usar tamaño predeterminado si no se especifica
@@ -58,6 +59,8 @@ class SnakeGame:
             
         # Control por IA
         self.ai_control = ai_control
+        # Modo entrenamiento (si es True, permite reiniciar el juego para entrenar)
+        self.training_mode = training_mode
         
         # init display
         self.display = pygame.display.set_mode((self.w, self.h))
@@ -158,6 +161,18 @@ class SnakeGame:
         if self._is_collision() or self.steps_without_food > 50 * len(self.snake):
             game_over = True
             reward = -10
+            
+            # Siempre terminar el juego cuando hay colisión
+            if self._is_collision():
+                # Mensaje de depuración más breve
+                if hasattr(self, 'verbose_debug') and self.verbose_debug:
+                    print(f"DEBUG: Colisión detectada. Terminando juego.")
+                
+                # Actualizar la pantalla una última vez para mostrar la colisión
+                self._update_ui()
+                pygame.display.flip()
+                time.sleep(0.2)  # Pausa breve para ver la colisión
+            
             return game_over, self.score, reward
 
         # 4. place new food or just move
@@ -455,6 +470,8 @@ class DecisionTable:
 # Algoritmo Genético
 class GeneticAlgorithm:
     def __init__(self, population_size=30, num_generations=50, mutation_rate=0.1, crossover_rate=0.8, elite_size=2):
+        # Atributo para configurar tipo de cruce (para experimentos)
+        self.crossover_type = "one_point"  # Opciones: "one_point", "two_point", "uniform"
         self.population_size = population_size
         self.num_generations = num_generations
         self.mutation_rate = mutation_rate
@@ -469,7 +486,7 @@ class GeneticAlgorithm:
         self.population = [DecisionTable() for _ in range(self.population_size)]
     
     def fitness(self, agent, num_games=5, show_game=False):
-        """Evalúa el fitness de un agente sobre múltiples juegos"""
+        """Evalúa el fitness de un agente sobre exactamente 3 juegos"""
         total_score = 0
         total_steps = 0
         movement_efficiency = 0  # Eficiencia de movimiento
@@ -477,12 +494,25 @@ class GeneticAlgorithm:
         foods_reached = 0        # Comidas alcanzadas
         avg_steps_per_food = []  # Pasos promedio para alcanzar comida
         
-        # Jugar varios juegos para evaluar mejor al agente
-        for game_num in range(num_games):
+        # IMPORTANTE: Siempre jugar exactamente 3 juegos, independientemente del parámetro num_games
+        exact_games = 3
+        print(f"\nIniciando evaluación de agente en {exact_games} juegos...")
+        
+        # Jugar exactamente 3 juegos para evaluar al agente
+        for game_num in range(exact_games):
             # Usar diferentes semillas para evaluar con más robustez
             random.seed(game_num + int(time.time()) % 1000)
             
-            game = SnakeGame(ai_control=True)
+            # Crear un nuevo juego para cada evaluación
+            # Desactivamos los mensajes de depuración durante la evaluación
+            # para no saturar la consola
+            original_print = print
+            if game_num > 0:  # Mantener los mensajes para el primer juego como referencia
+                def silent_print(*args, **kwargs):
+                    pass
+                builtins.print = silent_print
+            
+            game = SnakeGame(ai_control=True, training_mode=False)
             done = False
             score = 0
             steps_since_last_food = 0
@@ -493,6 +523,8 @@ class GeneticAlgorithm:
             prev_distance = None
             positions_set = set()  # Conjunto para rastrear posiciones únicas
             direct_path_bonus = 0  # Bonus por tomar camino directo a la comida
+            
+            print(f"Jugando partida {game_num + 1} de {exact_games}...")
             
             # Jugar hasta que termine
             while not done and steps_played < max_steps:
@@ -545,6 +577,15 @@ class GeneticAlgorithm:
             total_score += score
             total_steps += game.steps
             unique_positions += len(positions_set)
+            
+            # Restaurar la función print original al final de cada juego
+            if game_num > 0:
+                builtins.print = original_print
+                
+            print(f"\nJuego {game_num + 1} de 3 completado")
+            print(f"  - Puntuación: {score}")
+            print(f"  - Pasos totales: {steps_played}")
+            print(f"  - Comida encontrada: {foods_reached}")
         
         # Calcular eficiencia de rutas (menos pasos por comida = mejor)
         route_efficiency = 0
@@ -592,22 +633,60 @@ class GeneticAlgorithm:
     def crossover(self, parent1, parent2):
         """Realiza cruce entre dos padres"""
         if random.random() < self.crossover_rate:
-            # Cruce de un punto
-            child_weights = np.copy(parent1.weights)
-            rows, cols = parent1.weights.shape
+            # Tipo de cruce configurable (por defecto: cruce de un punto)
+            crossover_type = getattr(self, 'crossover_type', 'one_point')
             
-            # Seleccionar punto de cruce
-            crossover_point = random.randint(0, rows * cols - 1)
-            row_idx = crossover_point // cols
-            col_idx = crossover_point % cols
-            
-            # Realizar cruce
-            for i in range(rows):
-                for j in range(cols):
-                    if i > row_idx or (i == row_idx and j >= col_idx):
+            if crossover_type == "uniform":
+                # Cruce uniforme (50% de prob. de heredar de cada padre)
+                child_weights = np.zeros_like(parent1.weights)
+                rows, cols = parent1.weights.shape
+                for i in range(rows):
+                    for j in range(cols):
+                        # 50% de probabilidad de heredar de cada padre
+                        if random.random() < 0.5:
+                            child_weights[i][j] = parent1.weights[i][j]
+                        else:
+                            child_weights[i][j] = parent2.weights[i][j]
+                
+                return DecisionTable(child_weights)
+                
+            elif crossover_type == "two_point":
+                # Cruce de dos puntos
+                child_weights = np.copy(parent1.weights)
+                rows, cols = parent1.weights.shape
+                
+                # Seleccionar dos puntos de cruce
+                total_genes = rows * cols
+                point1 = random.randint(0, total_genes - 2)
+                point2 = random.randint(point1 + 1, total_genes - 1)
+                
+                # Convertir a índices 2D
+                for idx in range(total_genes):
+                    i = idx // cols
+                    j = idx % cols
+                    # Asignar genes del segundo padre solo entre los dos puntos
+                    if point1 < idx <= point2:
                         child_weights[i][j] = parent2.weights[i][j]
-            
-            return DecisionTable(child_weights)
+                
+                return DecisionTable(child_weights)
+                
+            else:  # one_point (predeterminado)
+                # Cruce de un punto
+                child_weights = np.copy(parent1.weights)
+                rows, cols = parent1.weights.shape
+                
+                # Seleccionar punto de cruce
+                crossover_point = random.randint(0, rows * cols - 1)
+                row_idx = crossover_point // cols
+                col_idx = crossover_point % cols
+                
+                # Realizar cruce
+                for i in range(rows):
+                    for j in range(cols):
+                        if i > row_idx or (i == row_idx and j >= col_idx):
+                            child_weights[i][j] = parent2.weights[i][j]
+                
+                return DecisionTable(child_weights)
         else:
             # Si no hay cruce, devolver copia del primer padre
             return DecisionTable(np.copy(parent1.weights))
@@ -707,9 +786,11 @@ class GeneticAlgorithm:
         plt.show()
     
     def demo_best_agent(self, agent):
-        """Demuestra el mejor agente en una partida"""
+        """Demuestra el mejor agente en una sola partida y termina"""
         # Crear un juego con velocidad reducida para la demostración
-        game = SnakeGame(ai_control=True)
+        # Importante: training_mode=False para que el juego termine cuando hay colisión
+        game = SnakeGame(ai_control=True, training_mode=False)
+        print("\n=== DEMOSTRACIÓN DEL MEJOR AGENTE (1 JUEGO) ===\n")
         done = False
         score = 0
         steps = 0
@@ -722,22 +803,53 @@ class GeneticAlgorithm:
         # Reiniciar historial de acciones para la demostración
         agent.recent_actions = []
         
-        print("\nIniciando demostración del mejor agente...")
-        print("(Observar comportamiento - el juego termina al chocar, NO se reinicia automáticamente)")
+        print("Iniciando demostración - el juego terminará tras una única partida")
+        
+        # Imprimir posición inicial
+        print(f"Posición inicial: ({game.head.x}, {game.head.y})")
+        print(f"Tamaño del tablero: {game.w}x{game.h}")
+        print(f"Posición inicial de la comida: ({game.food.x}, {game.food.y})")
         
         while not done and steps < max_steps:
             # Obtener estado y acción
             state = game.get_state()
             action = agent.get_action(state)
             
+            # Mostrar dirección actual y acción tomada
+            direction_names = {0: 'DERECHA', 1: 'ABAJO', 2: 'IZQUIERDA', 3: 'ARRIBA'}
+            action_names = {0: 'DERECHA', 1: 'ABAJO', 2: 'IZQUIERDA', 3: 'ARRIBA'}
+            
+            # Convertir acción de formato one-hot a índice
+            action_idx = np.argmax(action)
+            
+            print(f"DEBUG: Paso {steps} - Dirección actual: {direction_names.get(game.direction, 'DESCONOCIDA')}, Acción: {action_names.get(action_idx, 'DESCONOCIDA')}")
+            print(f"DEBUG: Posición de la cabeza: ({game.head.x}, {game.head.y})")
+            
             # Ejecutar acción
             prev_score = score
+            prev_head = Point(game.head.x, game.head.y)  # Guardar posición anterior
             done, score, _ = game.play_step(action)
             
             # Verificar si encontró comida
             if score > prev_score:
                 comida_encontrada += 1
                 print(f"\n¡COMIDA ENCONTRADA! Total: {comida_encontrada}")
+                print(f"DEBUG: Nueva posición de la comida: ({game.food.x}, {game.food.y})")
+            
+            # Verificar si hubo colisión
+            if done:
+                print("\nDEBUG: ¡COLISIÓN DETECTADA!")
+                # Determinar tipo de colisión
+                new_head = game.head
+                if new_head.x >= game.w or new_head.x < 0 or new_head.y >= game.h or new_head.y < 0:
+                    print(f"DEBUG: Colisión con PARED en posición ({new_head.x}, {new_head.y})")
+                    print(f"DEBUG: Límites del tablero: (0,0) a ({game.w-1},{game.h-1})")
+                else:
+                    # Verificar colisión con el cuerpo
+                    for i, segment in enumerate(game.snake[1:], 1):
+                        if new_head.x == segment.x and new_head.y == segment.y:
+                            print(f"DEBUG: Colisión con CUERPO en segmento {i} en posición ({segment.x}, {segment.y})")
+                            break
             
             # Pausa para visualización
             time.sleep(pause_time)
@@ -745,27 +857,33 @@ class GeneticAlgorithm:
             
             # Mostrar información cada 50 pasos
             if steps % 50 == 0:
-                print(f"Paso: {steps}, Puntuación: {score}")
+                print(f"Paso: {steps}, Puntuación: {score}, Longitud serpiente: {len(game.snake)}")
         
         # Mostrar resumen al finalizar
-        print("\n" + "=" * 30)
-        print("RESUMEN:")
+        print("\n" + "=" * 50)
+        print("RESUMEN DE LA DEMOSTRACIÓN:")
         print(f"Pasos totales: {steps}")
         print(f"Puntuación final: {score}")
         print(f"Comida encontrada: {comida_encontrada}")
+        print(f"Longitud final de la serpiente: {len(game.snake)}")
         
         if steps >= max_steps:
             print("Demostración finalizada por límite de pasos.")
-        elif done and game._is_collision():
-            print("La serpiente chocó y el juego terminó.")
+        elif done:
+            if game._is_collision():
+                print("La serpiente chocó y el juego terminó correctamente.")
+            else:
+                print("El juego terminó por otra razón (no colisión).")
                 
-        print("=" * 30)
+        print("=" * 50)
+        print("\nDEMOSTRACIÓN COMPLETADA. NO SE EJECUTARÁN MÁS JUEGOS.\n")
             
         return score
 
 def play_human():
     """Función para jugar manualmente"""
-    game = SnakeGame(ai_control=False)
+    # En modo humano, no queremos reinicio automático cuando hay colisión
+    game = SnakeGame(ai_control=False, training_mode=False)
     
     while True:
         game_over, score, _ = game.play_step()
@@ -784,6 +902,12 @@ def train_and_play_ai():
     mutation_rate = 0.25  # Mayor mutación para evitar mínimos locales
     crossover_rate = 0.85 # Mayor crossover para combinar buenas características
     elite_size = 5        # Preservar a los 5 mejores
+    
+    print("\nDEBUG: Iniciando función train_and_play_ai()")
+    
+    print("\nNota: Durante el entrenamiento, la serpiente se reiniciará automáticamente")
+    print("para evaluar múltiples agentes, pero en la demostración final el juego")
+    print("terminará correctamente cuando la serpiente choque.")
     
     print(f"Iniciando entrenamiento con {population_size} agentes durante {num_generations} generaciones...")
     print("(Esto puede tomar varios minutos, por favor espera)")
@@ -805,6 +929,7 @@ def train_and_play_ai():
     
     # Demostrar mejor agente
     print("\nDemostrando mejor agente...")
+    print("DEBUG: Llamando a demo_best_agent() desde train_and_play_ai()")
     best_score = ga.demo_best_agent(best_agent)
     
     # Preguntar si quiere jugar de nuevo con el mismo agente
@@ -815,12 +940,85 @@ def train_and_play_ai():
     
     return best_agent, best_score
 
+def run_different_crossover(crossover_type="one_point"):
+    """Implementación de diferentes tipos de cruce para experimentos"""
+    # Esta función reemplaza el método de cruce en GeneticAlgorithm
+    if crossover_type == "uniform":
+        # Cruce uniforme (50% de prob. de heredar de cada padre)
+        child_weights = np.zeros_like(parent1.weights)
+        for i in range(rows):
+            for j in range(cols):
+                # 50% de probabilidad de heredar de cada padre
+                if random.random() < 0.5:
+                    child_weights[i][j] = parent1.weights[i][j]
+                else:
+                    child_weights[i][j] = parent2.weights[i][j]
+        return DecisionTable(child_weights)
+    
+    elif crossover_type == "two_point":
+        # Cruce de dos puntos
+        child_weights = np.copy(parent1.weights)
+        rows, cols = parent1.weights.shape
+        
+        # Seleccionar dos puntos de cruce
+        total_genes = rows * cols
+        point1 = random.randint(0, total_genes - 2)
+        point2 = random.randint(point1 + 1, total_genes - 1)
+        
+        # Convertir a índices 2D
+        point1_row = point1 // cols
+        point1_col = point1 % cols
+        point2_row = point2 // cols
+        point2_col = point2 % cols
+        
+        # Primera sección (hasta point1): mantener parent1
+        # Segunda sección (point1 a point2): usar parent2
+        # Tercera sección (después de point2): mantener parent1
+        for i in range(rows):
+            for j in range(cols):
+                idx = i * cols + j
+                if point1 < idx <= point2:
+                    child_weights[i][j] = parent2.weights[i][j]
+        
+        return DecisionTable(child_weights)
+    
+    else:  # one_point (predeterminado)
+        # Cruce de un punto (implementación original)
+        child_weights = np.copy(parent1.weights)
+        rows, cols = parent1.weights.shape
+        
+        # Seleccionar punto de cruce
+        crossover_point = random.randint(0, rows * cols - 1)
+        row_idx = crossover_point // cols
+        col_idx = crossover_point % cols
+        
+        # Realizar cruce
+        for i in range(rows):
+            for j in range(cols):
+                if i > row_idx or (i == row_idx and j >= col_idx):
+                    child_weights[i][j] = parent2.weights[i][j]
+        
+        return DecisionTable(child_weights)
+
 if __name__ == "__main__":
-    # Modo de juego (Human o AI)
-    mode = input("Selecciona modo de juego (1: Humano, 2: IA): ")
+    # Menú principal ampliado con opción de experimentos
+    print("\n=== SNAKE CON ALGORITMO GENÉTICO ===\n")
+    print("1: Juego manual (control con flechas)")
+    print("2: Entrenamiento y demostración de IA")
+    print("3: Ejecutar experimentos comparativos")
+    
+    mode = input("\nSelecciona modo: ")
     
     if mode == "1":
         play_human()
+    elif mode == "3":
+        # Importar y ejecutar experimentos
+        try:
+            from snake_experiments import run_experiments
+            run_experiments()
+        except ImportError:
+            print("\nError: No se encuentra el módulo 'snake_experiments.py'")
+            print("Verifica que el archivo 'snake_experiments.py' esté en el mismo directorio.")
     else:
         train_and_play_ai()
     
