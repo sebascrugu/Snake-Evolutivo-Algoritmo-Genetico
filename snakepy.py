@@ -495,7 +495,7 @@ class GeneticAlgorithm:
         avg_steps_per_food = []  # Pasos promedio para alcanzar comida
         
         # IMPORTANTE: Siempre jugar exactamente 3 juegos, independientemente del parámetro num_games
-        exact_games = 3
+        exact_games = 1
         print(f"\nIniciando evaluación de agente en {exact_games} juegos...")
         
         # Jugar exactamente 3 juegos para evaluar al agente
