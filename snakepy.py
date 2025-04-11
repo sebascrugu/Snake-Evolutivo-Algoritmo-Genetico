@@ -1001,25 +1001,23 @@ def run_different_crossover(crossover_type="one_point"):
         return DecisionTable(child_weights)
 
 if __name__ == "__main__":
-    # Menú principal ampliado con opción de experimentos
+    # Menú simplificado con solo dos opciones
     print("\n=== SNAKE CON ALGORITMO GENÉTICO ===\n")
     print("1: Juego manual (control con flechas)")
-    print("2: Entrenamiento y demostración de IA")
-    print("3: Ejecutar experimentos comparativos")
+    print("2: Experimento de 3 juegos y terminar")
     
     mode = input("\nSelecciona modo: ")
     
     if mode == "1":
         play_human()
-    elif mode == "3":
-        # Importar y ejecutar experimentos
+    else:
+        # Importar y ejecutar el experimento de 3 juegos
         try:
             from snake_experiments import run_experiments
+            print("\nIniciando experimento con 3 juegos consecutivos...")
             run_experiments()
         except ImportError:
             print("\nError: No se encuentra el módulo 'snake_experiments.py'")
             print("Verifica que el archivo 'snake_experiments.py' esté en el mismo directorio.")
-    else:
-        train_and_play_ai()
     
     pygame.quit()

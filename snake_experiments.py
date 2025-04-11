@@ -58,8 +58,97 @@ def run_experiment(experiment_config, num_runs=3):
         # Medir tiempo de ejecución
         start_time = time.time()
         
-        # Ejecutar evolución
+        # Modificar la función evolve para mostrar progreso detallado
+        # Guardar la función original
+        original_evolve = ga.evolve
+        
+        # Tiempo de inicio para calcular duración
+        start_time = time.time()
+        
+        # Crear una función wrapper que muestre progreso detallado
+        def evolve_with_progress(show_progress=True):
+            # Inicializar población si no está inicializada
+            if not ga.population:
+                ga.initialize_population()
+            
+            # Mostrar información de inicio
+            total_generations = ga.num_generations
+            print(f"\nIniciando evolución con {ga.population_size} agentes durante {total_generations} generaciones")
+            print(f"Configuración: Mutación={ga.mutation_rate}, Cruce={ga.crossover_rate}, Élite={ga.elite_size}, Tipo de cruce={ga.crossover_type}")
+            print("\nProgreso de la evolución:")
+            print("-" * 70)
+            
+            # Para cada generación
+            for generation in range(total_generations):
+                # Evaluar fitness
+                fitnesses = [ga.fitness(agent) for agent in ga.population]
+                
+                # Encontrar mejor agente
+                max_fitness_idx = np.argmax(fitnesses)
+                best_fitness = fitnesses[max_fitness_idx]
+                best_agent = ga.population[max_fitness_idx]
+                
+                # Guardar estadísticas
+                ga.best_fitness_history.append(best_fitness)
+                ga.avg_fitness_history.append(sum(fitnesses) / len(fitnesses))
+                
+                # Mostrar progreso detallado
+                if show_progress:
+                    progress_percent = (generation + 1) / total_generations * 100
+                    if generation % 5 == 0 or generation == total_generations - 1:
+                        print(f"Generación {generation+1}/{total_generations} ({progress_percent:.1f}%) - Mejor fitness: {best_fitness:.2f}, Promedio: {ga.avg_fitness_history[-1]:.2f}")
+                        # Mostrar una barra de progreso visual
+                        bar_length = 40
+                        filled_length = int(bar_length * (generation + 1) / total_generations)
+                        bar = '█' * filled_length + '░' * (bar_length - filled_length)
+                        print(f"[{bar}] {progress_percent:.1f}%")
+                
+                # Crear nueva población
+                new_population = []
+                
+                # Elitismo: pasar los mejores agentes directamente
+                sorted_indices = np.argsort(fitnesses)[::-1]
+                for i in range(ga.elite_size):
+                    elite_idx = sorted_indices[i]
+                    new_population.append(DecisionTable(np.copy(ga.population[elite_idx].weights)))
+                
+                # Generar el resto de la población mediante selección, cruce y mutación
+                while len(new_population) < ga.population_size:
+                    # Selección
+                    parent_indices = ga.selection(fitnesses)
+                    parent1 = ga.population[parent_indices[0]]
+                    parent2 = ga.population[parent_indices[1]]
+                    
+                    # Cruce
+                    child = ga.crossover(parent1, parent2)
+                    
+                    # Mutación
+                    child = ga.mutate(child)
+                    
+                    # Agregar a nueva población
+                    new_population.append(child)
+                
+                # Reemplazar población
+                ga.population = new_population
+            
+            # Evaluar fitness final
+            final_fitnesses = [ga.fitness(agent) for agent in ga.population]
+            best_idx = np.argmax(final_fitnesses)
+            
+            print(f"\nEvolución completada. Mejor fitness final: {final_fitnesses[best_idx]:.2f}")
+            print("-" * 70)
+            print(f"Tiempo transcurrido: {time.time() - start_time:.2f} segundos")
+            
+            return ga.population[best_idx]
+        
+        # Reemplazar temporalmente la función evolve
+        ga.evolve = evolve_with_progress
+        
+        # Ejecutar evolución con progreso detallado
         best_agent = ga.evolve(show_progress=True)
+        
+        # Restaurar la función original
+        ga.evolve = original_evolve
         
         # Calcular tiempo de ejecución
         execution_time = time.time() - start_time
@@ -202,42 +291,97 @@ def compare_experiments(experiment_results):
 
 def run_experiments():
     """
-    Ejecuta una única evaluación con exactamente 3 juegos y termina.
-    Sin entrenamiento, generaciones ni evolución.
+    Ejecuta tres experimentos con diferentes configuraciones de algoritmos genéticos
+    para el juego Snake y compara los resultados utilizando el proceso evolutivo completo.
     """
     print("\n" + "="*50)
-    print("EXPERIMENTO SIMPLE CON SNAKE")
+    print("EXPERIMENTOS EVOLUTIVOS COMPARATIVOS PARA SNAKE")
     print("="*50)
+    print("\nSe ejecutarán 3 experimentos con diferentes configuraciones.")
+    print("Cada experimento ejecutará el proceso evolutivo completo.")
+    print("Al finalizar, se compararán los resultados de los tres experimentos.\n")
     
-    print("\nEjecutando una evaluación con exactamente 3 juegos...")
+    # Definir las tres configuraciones experimentales
+    # Reemplaza temporalmente tus configuraciones actuales con estas
+    experiment_configs = [
+    {
+        'name': 'Mini Base',
+        'population_size': 10,       # Reducido de 30
+        'num_generations': 5,        # Reducido de 50
+        'mutation_rate': 0.1,
+        'crossover_rate': 0.8,
+        'elite_size': 1,             # Reducido de 2
+        'crossover_type': 'one_point'
+    },
+    {
+        'name': 'Mini Exploración',
+        'population_size': 15,       # Reducido de 80
+        'num_generations': 5,        # Reducido de 50
+        'mutation_rate': 0.25,
+        'crossover_rate': 0.7,
+        'elite_size': 1,             # Reducido de 3
+        'crossover_type': 'uniform'
+    },
+    {
+        'name': 'Mini Explotación',
+        'population_size': 10,       # Reducido de 50
+        'num_generations': 8,        # Reducido de 75
+        'mutation_rate': 0.05,
+        'crossover_rate': 0.9,
+        'elite_size': 2,             # Reducido de 8
+        'crossover_type': 'two_point'
+    }
+    ]
     
-    # Crear un único agente con una tabla de decisión predefinida (valores por defecto)
-    # No realizar entrenamiento ni evolución, solo evaluar este agente
-    agente = DecisionTable()
+    # Almacenar los resultados de cada experimento
+    results = []
+    total_experiments = len(experiment_configs)
     
-    print("\nEvaluando agente en 3 juegos consecutivos...")
+    # Ejecutar cada experimento utilizando la función run_experiment() existente
+    for i, config in enumerate(experiment_configs):
+        print(f"\n\nEJECUTANDO EXPERIMENTO {i+1}/{total_experiments}: {config['name']}")
+        print("="*50)
+        print(f"\nConfiguración: {config}")
+        print(f"Progreso general: {i+1}/{total_experiments} experimentos ({(i+1)/total_experiments*100:.1f}%)")
+        
+        # Ejecutar el experimento con la configuración actual
+        # Usar num_runs=1 para que cada configuración se ejecute una sola vez
+        result = run_experiment(config, num_runs=1)
+        results.append(result)
+        
+        # Mostrar resumen del experimento actual
+        best_fitness = max(result['avg_best_fitness'])
+        print(f"\nResumen del Experimento {i+1}: {config['name']}")
+        print(f"Fitness máximo alcanzado: {best_fitness:.2f}")
+        print(f"\nExperimento {i+1}/{total_experiments} completado.")
+        if i < total_experiments - 1:
+            print("Preparando siguiente experimento...\n")
+        print(f"Tiempo de ejecución: {result['avg_execution_time']:.2f} segundos")
+        print("="*50)
     
-    # Crear instancia del algoritmo genético solo para usar el método fitness
-    ga = GeneticAlgorithm()
+    print("\nTodos los experimentos evolutivos han sido completados.")
     
-    # Iniciar cronometraje
-    start_time = time.time()
+    # Comparar los resultados utilizando la función compare_experiments() existente
+    print("\nGenerando gráficas comparativas de los tres experimentos...")
+    compare_experiments(results)
     
-    # Realizar una única evaluación con 3 juegos
-    # El método fitness ya está configurado para jugar exactamente 3 juegos
-    fitness_valor = ga.fitness(agente)
+    # Encontrar la mejor configuración
+    best_experiment_idx = np.argmax([max(result['avg_best_fitness']) for result in results])
+    best_result = results[best_experiment_idx]
     
-    # Calcular tiempo de ejecución
-    execution_time = time.time() - start_time
-    
-    # Mostrar resumen de resultados
     print("\n" + "="*50)
-    print("RESUMEN DEL EXPERIMENTO:")
-    print(f"Fitness obtenido: {fitness_valor:.2f}")
-    print(f"Tiempo de ejecución: {execution_time:.2f} segundos")
+    print("MEJOR CONFIGURACIÓN ENCONTRADA:")
+    print(f"Experimento: {best_result['config']['name']}")
+    print(f"Fitness máximo: {max(best_result['avg_best_fitness']):.2f}")
+    print(f"Parámetros:\n  - Tamaño de población: {best_result['config']['population_size']}")
+    print(f"  - Generaciones: {best_result['config']['num_generations']}")
+    print(f"  - Tasa de mutación: {best_result['config']['mutation_rate']}")
+    print(f"  - Tasa de cruce: {best_result['config']['crossover_rate']}")
+    print(f"  - Tamaño de élite: {best_result['config']['elite_size']}")
+    print(f"  - Tipo de cruce: {best_result['config']['crossover_type']}")
     print("="*50)
     
-    print("\nExperimento completado. No se ejecutarán más evaluaciones.")
+    print("\nExperimentos evolutivos completados. Gráficas guardadas como 'comparacion_experimentos.png' y 'distribucion_fitness.png'")
 
 if __name__ == "__main__":
     run_experiments()
