@@ -8,6 +8,7 @@ from collections import namedtuple
 from enum import Enum
 import time
 import builtins
+import os
 
 import pygame
 
@@ -45,7 +46,7 @@ BOARD_SIZE = (20, 20)  # Tamaño del tablero en celdas (ancho, alto)
 
 class SnakeGame:
 
-    def __init__(self, width=None, height=None, ai_control=False, training_mode=False, verbose_debug=False):
+    def __init__(self, width=None, height=None, ai_control=False, training_mode=False, headless=False):
         # Configuración del tamaño del tablero
         if width is None or height is None:
             # Usar tamaño predeterminado si no se especifica
@@ -61,10 +62,16 @@ class SnakeGame:
         self.ai_control = ai_control
         # Modo entrenamiento (si es True, permite reiniciar el juego para entrenar)
         self.training_mode = training_mode
+        self.headless = headless
         
         # init display
-        self.display = pygame.display.set_mode((self.w, self.h))
-        pygame.display.set_caption("Snake - AI Genetic")
+        if not headless:
+            self.display = pygame.display.set_mode((self.w, self.h))
+            pygame.display.set_caption("Snake - AI Genetic")
+        else:
+            # En modo headless, crear una superficie invisible para simulaciones
+            self.display = pygame.Surface((self.w, self.h))
+            
         self.clock = pygame.time.Clock()
 
         # init game state
@@ -134,10 +141,12 @@ class SnakeGame:
                         self.direction = Direction.DOWN
         else:
             # Procesar eventos para poder cerrar la ventana
-            for event in pygame.event.get():
-                if event.type == pygame.QUIT:
-                    pygame.quit()
-                    quit()
+            # En modo headless no es necesario procesar eventos
+            if not self.headless:
+                for event in pygame.event.get():
+                    if event.type == pygame.QUIT:
+                        pygame.quit()
+                        quit()
             
             # Utilizar la acción de la IA
             if action is not None:
@@ -164,14 +173,11 @@ class SnakeGame:
             
             # Siempre terminar el juego cuando hay colisión
             if self._is_collision():
-                # Mensaje de depuración más breve
-                if hasattr(self, 'verbose_debug') and self.verbose_debug:
-                    print(f"DEBUG: Colisión detectada. Terminando juego.")
-                
                 # Actualizar la pantalla una última vez para mostrar la colisión
                 self._update_ui()
-                pygame.display.flip()
-                time.sleep(0.2)  # Pausa breve para ver la colisión
+                if not self.headless:
+                    pygame.display.flip()
+                    time.sleep(0.2)  # Pausa breve para ver la colisión
             
             return game_over, self.score, reward
 
@@ -186,7 +192,8 @@ class SnakeGame:
 
         # 5. update ui and clock
         self._update_ui()
-        self.clock.tick(SPEED)
+        if not self.headless:
+            self.clock.tick(SPEED)
         
         # 6. return game over and score
         return game_over, self.score, reward
@@ -250,7 +257,10 @@ class SnakeGame:
 
         text = font.render("Score: " + str(self.score), True, WHITE)
         self.display.blit(text, [0, 0])
-        pygame.display.flip()
+        
+        # Solo actualizar la visualización si no estamos en modo headless
+        if not self.headless:
+            pygame.display.flip()
 
     def _move(self, direction):
         """Mueve la cabeza de la serpiente según la dirección"""
@@ -467,6 +477,61 @@ class DecisionTable:
                 
         return False
 
+    def crossover(self, other):
+        """
+        Realiza cruce entre esta tabla de decisión y otra.
+        
+        Args:
+            other: Otra tabla de decisión
+            
+        Returns:
+            Una nueva tabla de decisión resultante del cruce
+        """
+        # Crear una copia de los pesos del primer padre
+        child_weights = np.copy(self.weights)
+        
+        # Cruce uniforme (50% de probabilidad de heredar de cada padre)
+        rows, cols = self.weights.shape
+        for i in range(rows):
+            for j in range(cols):
+                # 50% de probabilidad de heredar de cada padre
+                if random.random() < 0.5:
+                    child_weights[i][j] = other.weights[i][j]
+        
+        # Crear nueva tabla de decisión con los pesos resultantes
+        return DecisionTable(child_weights)
+    
+    def mutate(self, mutation_rate):
+        """
+        Aplica mutación a esta tabla con la tasa especificada.
+        
+        Args:
+            mutation_rate: Probabilidad de mutación para cada gen
+            
+        Returns:
+            Esta tabla mutada (para permitir encadenamiento)
+        """
+        # Aplicar mutación con cierta probabilidad a cada peso
+        rows, cols = self.weights.shape
+        
+        for i in range(rows):
+            for j in range(cols):
+                if random.random() < mutation_rate:
+                    # Añadir ruido gaussiano con desviación moderada
+                    self.weights[i][j] += np.random.normal(0, 0.5)
+                    
+                    # 10% de probabilidad de mutación más drástica
+                    if random.random() < 0.1:
+                        # Mutación más agresiva (cambio de signo o reemplazo total)
+                        if random.random() < 0.5:
+                            # Cambiar signo
+                            self.weights[i][j] *= -1
+                        else:
+                            # Valor completamente nuevo
+                            self.weights[i][j] = np.random.normal(0, 1.5)
+        
+        return self
+
 # Algoritmo Genético
 class GeneticAlgorithm:
     def __init__(self, population_size=30, num_generations=50, mutation_rate=0.1, crossover_rate=0.8, elite_size=2):
@@ -485,19 +550,29 @@ class GeneticAlgorithm:
         """Inicializa la población con tablas de decisión aleatorias"""
         self.population = [DecisionTable() for _ in range(self.population_size)]
     
-    def fitness(self, agent, num_games=5, show_game=False):
+    def fitness(self, agent, num_games=5, show_game=False, silent=False):
         """Evalúa el fitness de un agente sobre exactamente 3 juegos"""
+        import os  # Asegurar que 'os' esté disponible en esta función
+        
         total_score = 0
         total_steps = 0
         movement_efficiency = 0  # Eficiencia de movimiento
         unique_positions = 0     # Posiciones únicas visitadas
-        foods_reached = 0        # Comidas alcanzadas
+        foods_reached = 0        # Comidas alcanzadas (total acumulado)
         avg_steps_per_food = []  # Pasos promedio para alcanzar comida
         
         # IMPORTANTE: Siempre jugar exactamente 3 juegos, independientemente del parámetro num_games
-        exact_games = 1
-        print(f"\nIniciando evaluación de agente en {exact_games} juegos...")
+        exact_games = 3
+        if not silent:
+            print(f"\nIniciando evaluación de agente en {exact_games} juegos...")
         
+        # Control de visualización para procesos en paralelo
+        # Deshabilitar temporalmente la visualización de Pygame si estamos en modo silencioso (para paralelización)
+        os_environ_copy = None
+        if silent and 'SDL_VIDEODRIVER' not in os.environ:
+            os_environ_copy = os.environ.copy()
+            os.environ['SDL_VIDEODRIVER'] = 'dummy'  # Usar driver nulo para Pygame
+            
         # Jugar exactamente 3 juegos para evaluar al agente
         for game_num in range(exact_games):
             # Usar diferentes semillas para evaluar con más robustez
@@ -507,12 +582,13 @@ class GeneticAlgorithm:
             # Desactivamos los mensajes de depuración durante la evaluación
             # para no saturar la consola
             original_print = print
-            if game_num > 0:  # Mantener los mensajes para el primer juego como referencia
+            if game_num > 0 or silent:  # Silenciar todos los mensajes en modo silencioso
                 def silent_print(*args, **kwargs):
                     pass
                 builtins.print = silent_print
             
-            game = SnakeGame(ai_control=True, training_mode=False)
+            # Crear juego con visualización desactivada si estamos en modo silencioso
+            game = SnakeGame(ai_control=True, training_mode=False, headless=silent)
             done = False
             score = 0
             steps_since_last_food = 0
@@ -524,6 +600,22 @@ class GeneticAlgorithm:
             positions_set = set()  # Conjunto para rastrear posiciones únicas
             direct_path_bonus = 0  # Bonus por tomar camino directo a la comida
             
+            # Nuevas variables para métricas avanzadas
+            attempts_toward_food = 0       # Intentos de moverse hacia la comida
+            successful_food_approaches = 0  # Acercamientos exitosos a la comida
+            wall_avoidance_count = 0       # Veces que evitó una pared
+            near_death_avoidance = 0       # Veces que evitó una muerte cercana
+            consecutive_approach_food = 0  # Contador de aproximación consistente a la comida
+            food_eaten_in_game = 0         # Comida comida en este juego específico
+            
+            # Rastreo de patrones de movimiento
+            last_positions = []            # Últimas posiciones para detectar ciclos
+            repeated_cycles = 0            # Contador de ciclos repetidos
+            max_cycle_history = 20         # Tamaño máximo del historial de posiciones
+            
+            # Distancia inicial a la comida
+            initial_food_distance = abs(game.head.x - game.food.x) + abs(game.head.y - game.food.y)
+            
             print(f"Jugando partida {game_num + 1} de {exact_games}...")
             
             # Jugar hasta que termine
@@ -531,6 +623,21 @@ class GeneticAlgorithm:
                 state = game.get_state()
                 action = agent.get_action(state)
                 prev_score = score
+                
+                # Guardar posición antes de moverse
+                prev_pos = (game.head.x, game.head.y)
+                prev_snake_length = len(game.snake)
+                
+                # Verificar si va a evitar una pared o colisión inminente
+                danger_ahead = state[0]
+                danger_right = state[1]
+                danger_left = state[2]
+                
+                # Detectar si se va a evitar una pared
+                if danger_ahead and action != 0:  # No va hacia adelante cuando hay peligro
+                    wall_avoidance_count += 1
+                    near_death_avoidance += 1
+                
                 done, score, _ = game.play_step(action)
                 steps_played += 1
                 steps_since_last_food += 1
@@ -539,6 +646,21 @@ class GeneticAlgorithm:
                 pos = (game.head.x, game.head.y)
                 positions_set.add(pos)
                 
+                # Actualizar historial de posiciones para detección de ciclos
+                last_positions.append(pos)
+                if len(last_positions) > max_cycle_history:
+                    last_positions.pop(0)
+                
+                # Detectar ciclos repetitivos (patrones de 2, 3 o 4 movimientos)
+                if len(last_positions) >= 8:
+                    for cycle_len in [2, 3, 4]:
+                        if len(last_positions) >= cycle_len * 2:
+                            recent = last_positions[-cycle_len:]
+                            previous = last_positions[-2*cycle_len:-cycle_len]
+                            if recent == previous:
+                                repeated_cycles += 1
+                                break
+                
                 # Calcular distancia a la comida (Manhattan)
                 curr_distance = abs(game.head.x - game.food.x) + abs(game.head.y - game.food.y)
                 
@@ -546,29 +668,44 @@ class GeneticAlgorithm:
                 if prev_distance is None:
                     prev_distance = curr_distance
                 
-                # Recompensar por acercarse a la comida
+                # Analizar si se acerca a la comida
                 if curr_distance < prev_distance:
                     movement_efficiency += 1
-                    # Bonus adicional por moverse directamente hacia la comida
-                    direct_path_bonus += 0.1
+                    direct_path_bonus += 0.3  # Aumentado para dar más valor a moverse hacia la comida
+                    successful_food_approaches += 1
+                    consecutive_approach_food += 1
                 else:
-                    # Pequeña penalización por alejarse de la comida
-                    direct_path_bonus -= 0.05
+                    # Penalización por alejarse de la comida
+                    direct_path_bonus -= 0.1
+                    consecutive_approach_food = 0
+                
+                # Bonus exponencial por aproximación consistente
+                if consecutive_approach_food >= 3:
+                    direct_path_bonus += consecutive_approach_food * 0.5
                 
                 prev_distance = curr_distance
                 
                 # Verificar si encontró comida
                 if score > prev_score:
                     foods_reached += 1
+                    food_eaten_in_game += 1
                     # Registrar cuántos pasos tomó llegar a esta comida
                     avg_steps_per_food.append(steps_since_last_food)
                     steps_since_last_food = 0
-                    # Bonus adicional por encontrar comida
-                    direct_path_bonus += 5.0
+                    
+                    # Bonus por comer comida (mayor bonus mientras más crece)
+                    food_bonus_multiplier = 1 + (food_eaten_in_game * 0.5)  # Bonificación creciente
+                    direct_path_bonus += 10.0 * food_bonus_multiplier
+                    
+                    # Reiniciar distancia para próxima comida
+                    prev_distance = None
                 
                 # No mostrar todos los juegos (solo para visualizar el mejor)
                 if not show_game:
                     pygame.display.update()
+            
+            # Guardar distancia final a la comida al terminar
+            final_food_distance = curr_distance if 'curr_distance' in locals() else initial_food_distance
             
             # Terminar si se alcanzó el límite de pasos
             if steps_played >= max_steps and not done:
@@ -579,35 +716,89 @@ class GeneticAlgorithm:
             unique_positions += len(positions_set)
             
             # Restaurar la función print original al final de cada juego
-            if game_num > 0:
+            if game_num > 0 or silent:
                 builtins.print = original_print
                 
-            print(f"\nJuego {game_num + 1} de 3 completado")
-            print(f"  - Puntuación: {score}")
-            print(f"  - Pasos totales: {steps_played}")
-            print(f"  - Comida encontrada: {foods_reached}")
+            # Mostrar resultados de este juego específico
+            if not silent:
+                print(f"\nJuego {game_num + 1} de {exact_games} completado")
+                print(f"  - Puntuación: {score}")
+                print(f"  - Pasos totales: {steps_played}")
+                print(f"  - Comida encontrada en este juego: {food_eaten_in_game}")
+                print(f"  - Posiciones únicas visitadas: {len(positions_set)}")
+                print(f"  - Eficiencia de ruta: {(food_eaten_in_game / steps_played * 100):.2f}% (comidas/pasos)")
         
-        # Calcular eficiencia de rutas (menos pasos por comida = mejor)
+        # COMPONENTE 1: OBJETIVOS PRIMARIOS
+        # Puntos por comida (objetivo principal)
+        food_points = total_score * 70  # Aumentado a 70 para dar aún más prioridad a comer comida
+        
+        # Puntos por supervivencia (escalados según la longitud)
+        survival_points = total_steps * 0.3  # Reducido para no premiar tanto la supervivencia sin comer
+        
+        # COMPONENTE 2: EFICIENCIA Y COMPORTAMIENTO INTELIGENTE
+        # Eficiencia en conseguir comida
         route_efficiency = 0
         if avg_steps_per_food:
             # Invertimos la relación: menos pasos = mayor eficiencia
-            route_efficiency = 100 / (sum(avg_steps_per_food) / len(avg_steps_per_food) + 1)
+            route_efficiency = 120 / (sum(avg_steps_per_food) / len(avg_steps_per_food) + 1)
         
-        # Determinar si hubo muerte temprana
-        muerte_temprana = 1 if total_score == 0 else 0
+        # Bonus por aproximación a la comida
+        food_approach_bonus = successful_food_approaches * 3  # Aumentado para premiar más el acercarse a la comida
         
-        # Fórmula de fitness mejorada para priorizar encuentro de comida
-        fitness = (total_score * 30) + \
-                 (foods_reached * 20) + \
-                 (movement_efficiency * 1.0) + \
-                 (route_efficiency * 2.0) + \
-                 (unique_positions * 0.2) + \
-                 (direct_path_bonus * 2.0) - \
-                 (muerte_temprana * 100)  # Penalización más severa por muerte sin comer
-                 
-        avg_fitness = fitness / num_games
+        # COMPONENTE 3: CRECIMIENTO Y EXPLORACIÓN
+        # Bonus por exploración (evitar quedarse en áreas pequeñas)
+        exploration_bonus = unique_positions * 0.5  # Reducido ligeramente
         
-        return avg_fitness
+        # Bonus por evitar paredes y colisiones
+        avoidance_bonus = wall_avoidance_count * 0.5 + near_death_avoidance * 2
+        
+        # COMPONENTE 4: PENALIZACIONES
+        # Penalización por muerte temprana
+        early_death_penalty = 0
+        if total_score == 0:  # No comió nada
+            early_death_penalty = 300  # Aumentada para penalizar más fuertemente no comer nada
+        elif total_steps < 30:  # Muerte muy temprana
+            early_death_penalty = 200
+        
+        # Penalización por movimientos repetitivos
+        repetition_penalty = repeated_cycles * 8  # Aumentado para penalizar más los ciclos
+        
+        # CÁLCULO FINAL CON PONDERACIONES OPTIMIZADAS
+        fitness = (
+            food_points +                  # Prioridad máxima a comer comida
+            survival_points +              # Valor bajo a la supervivencia
+            route_efficiency * 4.0 +       # Máxima importancia a la eficiencia
+            food_approach_bonus +          # Premiar acercarse a la comida
+            direct_path_bonus * 2.5 +      # Premiar rutas directas
+            exploration_bonus +            # Valor bajo a la exploración general
+            avoidance_bonus +              # Premiar evitar obstáculos
+            (movement_efficiency * 1.0) -  # Valor bajo al movimiento general
+            early_death_penalty -          # Fuerte penalización por muerte temprana
+            repetition_penalty             # Alta penalización por ciclos repetitivos
+        )
+        
+        # Resumen de la evaluación
+        if not silent:
+            print("\n" + "="*50)
+            print(f"RESUMEN DE EVALUACIÓN DEL AGENTE")
+            print(f"  • Total de comida encontrada: {total_score}")
+            print(f"  • Total de pasos realizados: {total_steps}")
+            print(f"  • Eficiencia de movimiento: {movement_efficiency}")
+            if avg_steps_per_food:
+                print(f"  • Promedio de pasos por comida: {sum(avg_steps_per_food) / len(avg_steps_per_food):.2f}")
+            print(f"  • Posiciones únicas visitadas: {unique_positions}")
+            print(f"  • Fitness calculado: {fitness:.2f}")
+            print("="*50)
+        
+        # Restaurar variables de entorno si las modificamos
+        if os_environ_copy is not None:
+            os.environ.clear()
+            os.environ.update(os_environ_copy)
+            
+        # Garantizar un valor mínimo positivo para mantener diversidad genética
+        fitness = max(1.0, fitness / exact_games)
+        
+        return fitness
     
     def selection(self, fitnesses):
         """Selecciona padres usando método de ruleta"""
@@ -784,101 +975,6 @@ class GeneticAlgorithm:
         plt.grid(True)
         plt.savefig('fitness_history.png')
         plt.show()
-    
-    def demo_best_agent(self, agent):
-        """Demuestra el mejor agente en una sola partida y termina"""
-        # Crear un juego con velocidad reducida para la demostración
-        # Importante: training_mode=False para que el juego termine cuando hay colisión
-        game = SnakeGame(ai_control=True, training_mode=False)
-        print("\n=== DEMOSTRACIÓN DEL MEJOR AGENTE (1 JUEGO) ===\n")
-        done = False
-        score = 0
-        steps = 0
-        max_steps = 1000  # Límite de pasos para la demostración
-        comida_encontrada = 0
-        
-        # Usar una velocidad de actualización más lenta para mejor visualización
-        pause_time = 0.1  # Pausa para mejor visualización
-        
-        # Reiniciar historial de acciones para la demostración
-        agent.recent_actions = []
-        
-        print("Iniciando demostración - el juego terminará tras una única partida")
-        
-        # Imprimir posición inicial
-        print(f"Posición inicial: ({game.head.x}, {game.head.y})")
-        print(f"Tamaño del tablero: {game.w}x{game.h}")
-        print(f"Posición inicial de la comida: ({game.food.x}, {game.food.y})")
-        
-        while not done and steps < max_steps:
-            # Obtener estado y acción
-            state = game.get_state()
-            action = agent.get_action(state)
-            
-            # Mostrar dirección actual y acción tomada
-            direction_names = {0: 'DERECHA', 1: 'ABAJO', 2: 'IZQUIERDA', 3: 'ARRIBA'}
-            action_names = {0: 'DERECHA', 1: 'ABAJO', 2: 'IZQUIERDA', 3: 'ARRIBA'}
-            
-            # Convertir acción de formato one-hot a índice
-            action_idx = np.argmax(action)
-            
-            print(f"DEBUG: Paso {steps} - Dirección actual: {direction_names.get(game.direction, 'DESCONOCIDA')}, Acción: {action_names.get(action_idx, 'DESCONOCIDA')}")
-            print(f"DEBUG: Posición de la cabeza: ({game.head.x}, {game.head.y})")
-            
-            # Ejecutar acción
-            prev_score = score
-            prev_head = Point(game.head.x, game.head.y)  # Guardar posición anterior
-            done, score, _ = game.play_step(action)
-            
-            # Verificar si encontró comida
-            if score > prev_score:
-                comida_encontrada += 1
-                print(f"\n¡COMIDA ENCONTRADA! Total: {comida_encontrada}")
-                print(f"DEBUG: Nueva posición de la comida: ({game.food.x}, {game.food.y})")
-            
-            # Verificar si hubo colisión
-            if done:
-                print("\nDEBUG: ¡COLISIÓN DETECTADA!")
-                # Determinar tipo de colisión
-                new_head = game.head
-                if new_head.x >= game.w or new_head.x < 0 or new_head.y >= game.h or new_head.y < 0:
-                    print(f"DEBUG: Colisión con PARED en posición ({new_head.x}, {new_head.y})")
-                    print(f"DEBUG: Límites del tablero: (0,0) a ({game.w-1},{game.h-1})")
-                else:
-                    # Verificar colisión con el cuerpo
-                    for i, segment in enumerate(game.snake[1:], 1):
-                        if new_head.x == segment.x and new_head.y == segment.y:
-                            print(f"DEBUG: Colisión con CUERPO en segmento {i} en posición ({segment.x}, {segment.y})")
-                            break
-            
-            # Pausa para visualización
-            time.sleep(pause_time)
-            steps += 1
-            
-            # Mostrar información cada 50 pasos
-            if steps % 50 == 0:
-                print(f"Paso: {steps}, Puntuación: {score}, Longitud serpiente: {len(game.snake)}")
-        
-        # Mostrar resumen al finalizar
-        print("\n" + "=" * 50)
-        print("RESUMEN DE LA DEMOSTRACIÓN:")
-        print(f"Pasos totales: {steps}")
-        print(f"Puntuación final: {score}")
-        print(f"Comida encontrada: {comida_encontrada}")
-        print(f"Longitud final de la serpiente: {len(game.snake)}")
-        
-        if steps >= max_steps:
-            print("Demostración finalizada por límite de pasos.")
-        elif done:
-            if game._is_collision():
-                print("La serpiente chocó y el juego terminó correctamente.")
-            else:
-                print("El juego terminó por otra razón (no colisión).")
-                
-        print("=" * 50)
-        print("\nDEMOSTRACIÓN COMPLETADA. NO SE EJECUTARÁN MÁS JUEGOS.\n")
-            
-        return score
 
 def play_human():
     """Función para jugar manualmente"""
@@ -894,132 +990,57 @@ def play_human():
     print(f"Final Score: {score}")
     pygame.quit()
 
-def train_and_play_ai():
-    """Entrena un agente con algoritmo genético y lo demuestra"""
-    # Parámetros del algoritmo genético optimizados para aprendizaje eficiente
-    population_size = 70  # Mayor diversidad de agentes
-    num_generations = 30  # Generaciones suficientes para aprender
-    mutation_rate = 0.25  # Mayor mutación para evitar mínimos locales
-    crossover_rate = 0.85 # Mayor crossover para combinar buenas características
-    elite_size = 5        # Preservar a los 5 mejores
-    
-    print("\nDEBUG: Iniciando función train_and_play_ai()")
-    
-    print("\nNota: Durante el entrenamiento, la serpiente se reiniciará automáticamente")
-    print("para evaluar múltiples agentes, pero en la demostración final el juego")
-    print("terminará correctamente cuando la serpiente choque.")
-    
-    print(f"Iniciando entrenamiento con {population_size} agentes durante {num_generations} generaciones...")
-    print("(Esto puede tomar varios minutos, por favor espera)")
-    
-    # Crear y ejecutar algoritmo genético
-    ga = GeneticAlgorithm(
-        population_size=population_size,
-        num_generations=num_generations,
-        mutation_rate=mutation_rate,
-        crossover_rate=crossover_rate,
-        elite_size=elite_size
-    )
-    
-    # Evolucionar población
-    best_agent = ga.evolve(show_progress=True)
-    
-    # Mostrar gráfica de evolución
-    ga.plot_fitness_history()
-    
-    # Demostrar mejor agente
-    print("\nDemostrando mejor agente...")
-    print("DEBUG: Llamando a demo_best_agent() desde train_and_play_ai()")
-    best_score = ga.demo_best_agent(best_agent)
-    
-    # Preguntar si quiere jugar de nuevo con el mismo agente
-    retry = input("\n¿Quieres ver otra demostración con el mejor agente? (s/n): ")
-    if retry.lower() == 's':
-        print("\nMostrando otra demostración...")
-        ga.demo_best_agent(best_agent)
-    
-    return best_agent, best_score
-
-def run_different_crossover(crossover_type="one_point"):
-    """Implementación de diferentes tipos de cruce para experimentos"""
-    # Esta función reemplaza el método de cruce en GeneticAlgorithm
-    if crossover_type == "uniform":
-        # Cruce uniforme (50% de prob. de heredar de cada padre)
-        child_weights = np.zeros_like(parent1.weights)
-        for i in range(rows):
-            for j in range(cols):
-                # 50% de probabilidad de heredar de cada padre
-                if random.random() < 0.5:
-                    child_weights[i][j] = parent1.weights[i][j]
-                else:
-                    child_weights[i][j] = parent2.weights[i][j]
-        return DecisionTable(child_weights)
-    
-    elif crossover_type == "two_point":
-        # Cruce de dos puntos
-        child_weights = np.copy(parent1.weights)
-        rows, cols = parent1.weights.shape
-        
-        # Seleccionar dos puntos de cruce
-        total_genes = rows * cols
-        point1 = random.randint(0, total_genes - 2)
-        point2 = random.randint(point1 + 1, total_genes - 1)
-        
-        # Convertir a índices 2D
-        point1_row = point1 // cols
-        point1_col = point1 % cols
-        point2_row = point2 // cols
-        point2_col = point2 % cols
-        
-        # Primera sección (hasta point1): mantener parent1
-        # Segunda sección (point1 a point2): usar parent2
-        # Tercera sección (después de point2): mantener parent1
-        for i in range(rows):
-            for j in range(cols):
-                idx = i * cols + j
-                if point1 < idx <= point2:
-                    child_weights[i][j] = parent2.weights[i][j]
-        
-        return DecisionTable(child_weights)
-    
-    else:  # one_point (predeterminado)
-        # Cruce de un punto (implementación original)
-        child_weights = np.copy(parent1.weights)
-        rows, cols = parent1.weights.shape
-        
-        # Seleccionar punto de cruce
-        crossover_point = random.randint(0, rows * cols - 1)
-        row_idx = crossover_point // cols
-        col_idx = crossover_point % cols
-        
-        # Realizar cruce
-        for i in range(rows):
-            for j in range(cols):
-                if i > row_idx or (i == row_idx and j >= col_idx):
-                    child_weights[i][j] = parent2.weights[i][j]
-        
-        return DecisionTable(child_weights)
-
 if __name__ == "__main__":
-    # Menú principal ampliado con opción de experimentos
-    print("\n=== SNAKE CON ALGORITMO GENÉTICO ===\n")
-    print("1: Juego manual (control con flechas)")
-    print("2: Entrenamiento y demostración de IA")
-    print("3: Ejecutar experimentos comparativos")
+    # Menú principal con opciones más claras
+    print("\n" + "="*50)
+    print("SNAKE CON ALGORITMO GENÉTICO")
+    print("="*50)
+    print("\nOPCIONES DISPONIBLES:")
+    print("1. Juego manual (control con flechas)")
+    print("2. Experimentos comparativos (3 configuraciones)")
     
-    mode = input("\nSelecciona modo: ")
+    try:
+        mode = int(input("\nSelecciona una opción (1-2): "))
+    except ValueError:
+        mode = 0
     
-    if mode == "1":
+    if mode == 1:
+        print("\nIniciando juego manual. Usa las flechas del teclado para controlar la serpiente.")
         play_human()
-    elif mode == "3":
-        # Importar y ejecutar experimentos
+    elif mode == 2:
+        # Importar y ejecutar el experimento de 3 juegos
         try:
-            from snake_experiments import run_experiments
-            run_experiments()
-        except ImportError:
-            print("\nError: No se encuentra el módulo 'snake_experiments.py'")
+            # Verificar si el archivo existe primero
+            import os
+            if not os.path.exists("snake_experiments.py"):
+                script_dir = os.path.dirname(os.path.abspath(__file__))
+                print(f"\nBuscando snake_experiments.py en: {script_dir}")
+                if os.path.exists(os.path.join(script_dir, "snake_experiments.py")):
+                    print(f"Archivo encontrado en el directorio del script")
+                else:
+                    raise ImportError(f"No se encuentra el archivo snake_experiments.py en {script_dir}")
+            
+            # Intentar importar usando importlib para mayor robustez
+            import importlib.util
+            import sys
+            
+            # Determinar la ruta completa al archivo
+            script_dir = os.path.dirname(os.path.abspath(__file__))
+            module_path = os.path.join(script_dir, "snake_experiments.py")
+            
+            # Importar el módulo dinámicamente
+            spec = importlib.util.spec_from_file_location("snake_experiments", module_path)
+            snake_experiments = importlib.util.module_from_spec(spec)
+            sys.modules["snake_experiments"] = snake_experiments
+            spec.loader.exec_module(snake_experiments)
+            
+            print("\nIniciando experimentos comparativos con 3 configuraciones diferentes...")
+            snake_experiments.run_experiments()
+        except ImportError as e:
+            print(f"\nError: {e}")
             print("Verifica que el archivo 'snake_experiments.py' esté en el mismo directorio.")
     else:
-        train_and_play_ai()
+        print("\nOpción no válida. Selecciona 1 o 2.")
     
+    # Asegurar que pygame se cierre correctamente al finalizar
     pygame.quit()
