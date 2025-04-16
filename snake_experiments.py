@@ -486,24 +486,24 @@ def run_experiments():
     experiment_configs = [
         {
             'name': 'Exploración Agresiva',
-            'pop_size': 12,
-            'generations': 6,
+            'pop_size': 30,
+            'generations': 50,
             'mutation_rate': 0.35,     # Tasa de mutación más alta para explorar más
             'elitism': 1,              # Elitismo mínimo para evitar convergencia prematura
             'base_seed': int(time.time()) % 10000   # Semilla basada en el tiempo actual
         },
         {
             'name': 'Presión Selectiva Alta',
-            'pop_size': 15,
-            'generations': 5,
+            'pop_size': 30,
+            'generations': 50,
             'mutation_rate': 0.25,
             'elitism': 1,
             'base_seed': (int(time.time()) % 10000) + 5000  # Otra semilla única
         },
         {
             'name': 'Balance Optimizado',
-            'pop_size': 10,
-            'generations': 7,
+            'pop_size': 30,
+            'generations': 50,
             'mutation_rate': 0.3,      # Buena tasa de mutación para balance exploración-explotación
             'elitism': 1,
             'base_seed': (int(time.time()) % 10000) + 10000  # Tercera semilla única

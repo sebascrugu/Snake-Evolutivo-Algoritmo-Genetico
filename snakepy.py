@@ -551,235 +551,202 @@ class GeneticAlgorithm:
         self.population = [DecisionTable() for _ in range(self.population_size)]
     
     def fitness(self, agent, num_games=5, show_game=False, silent=False):
-        """Evalúa el fitness de un agente sobre exactamente 3 juegos"""
-        import os  # Asegurar que 'os' esté disponible en esta función
-        
+
         total_score = 0
         total_steps = 0
-        movement_efficiency = 0  # Eficiencia de movimiento
-        unique_positions = 0     # Posiciones únicas visitadas
-        foods_reached = 0        # Comidas alcanzadas (total acumulado)
-        avg_steps_per_food = []  # Pasos promedio para alcanzar comida
-        
-        # IMPORTANTE: Siempre jugar exactamente 3 juegos, independientemente del parámetro num_games
+        movement_efficiency = 0
+        unique_positions = 0
+        foods_reached = 0
+        avg_steps_per_food = []
+
         exact_games = 3
         if not silent:
             print(f"\nIniciando evaluación de agente en {exact_games} juegos...")
-        
-        # Control de visualización para procesos en paralelo
-        # Deshabilitar temporalmente la visualización de Pygame si estamos en modo silencioso (para paralelización)
+
         os_environ_copy = None
         if silent and 'SDL_VIDEODRIVER' not in os.environ:
             os_environ_copy = os.environ.copy()
-            os.environ['SDL_VIDEODRIVER'] = 'dummy'  # Usar driver nulo para Pygame
-            
-        # Jugar exactamente 3 juegos para evaluar al agente
+            os.environ['SDL_VIDEODRIVER'] = 'dummy'
+
         for game_num in range(exact_games):
-            # Usar diferentes semillas para evaluar con más robustez
             random.seed(game_num + int(time.time()) % 1000)
-            
-            # Crear un nuevo juego para cada evaluación
-            # Desactivamos los mensajes de depuración durante la evaluación
-            # para no saturar la consola
+
             original_print = print
-            if game_num > 0 or silent:  # Silenciar todos los mensajes en modo silencioso
-                def silent_print(*args, **kwargs):
-                    pass
+            if game_num > 0 or silent:
+                def silent_print(*args, **kwargs): pass
                 builtins.print = silent_print
-            
-            # Crear juego con visualización desactivada si estamos en modo silencioso
+
             game = SnakeGame(ai_control=True, training_mode=False, headless=silent)
             done = False
             score = 0
             steps_since_last_food = 0
-            
-            # Máximo de pasos para evitar juegos infinitos durante evaluación
-            max_steps = 400  # Reducido para evaluación más rápida
+            max_steps = 400
             steps_played = 0
             prev_distance = None
-            positions_set = set()  # Conjunto para rastrear posiciones únicas
-            direct_path_bonus = 0  # Bonus por tomar camino directo a la comida
-            
-            # Nuevas variables para métricas avanzadas
-            attempts_toward_food = 0       # Intentos de moverse hacia la comida
-            successful_food_approaches = 0  # Acercamientos exitosos a la comida
-            wall_avoidance_count = 0       # Veces que evitó una pared
-            near_death_avoidance = 0       # Veces que evitó una muerte cercana
-            consecutive_approach_food = 0  # Contador de aproximación consistente a la comida
-            food_eaten_in_game = 0         # Comida comida en este juego específico
-            
-            # Rastreo de patrones de movimiento
-            last_positions = []            # Últimas posiciones para detectar ciclos
-            repeated_cycles = 0            # Contador de ciclos repetidos
-            max_cycle_history = 20         # Tamaño máximo del historial de posiciones
-            
-            # Distancia inicial a la comida
+            positions_set = set()
+            direct_path_bonus = 0
+
+            attempts_toward_food = 0
+            successful_food_approaches = 0
+            wall_avoidance_count = 0
+            near_death_avoidance = 0
+            consecutive_approach_food = 0
+            food_eaten_in_game = 0
+
+            last_positions = []
+            repeated_cycles = 0
+            max_cycle_history = 20
+
             initial_food_distance = abs(game.head.x - game.food.x) + abs(game.head.y - game.food.y)
-            
+
+            # Nuevas métricas
+            idle_moves = 0
+            last_direction = None
+            wrong_moves_to_food = 0
+
             print(f"Jugando partida {game_num + 1} de {exact_games}...")
-            
-            # Jugar hasta que termine
+
             while not done and steps_played < max_steps:
                 state = game.get_state()
                 action = agent.get_action(state)
                 prev_score = score
-                
-                # Guardar posición antes de moverse
                 prev_pos = (game.head.x, game.head.y)
                 prev_snake_length = len(game.snake)
-                
-                # Verificar si va a evitar una pared o colisión inminente
+
                 danger_ahead = state[0]
                 danger_right = state[1]
                 danger_left = state[2]
-                
-                # Detectar si se va a evitar una pared
-                if danger_ahead and action != 0:  # No va hacia adelante cuando hay peligro
+
+                if danger_ahead and action != 0:
                     wall_avoidance_count += 1
                     near_death_avoidance += 1
-                
+
                 done, score, _ = game.play_step(action)
                 steps_played += 1
                 steps_since_last_food += 1
-                
-                # Rastrear posiciones únicas visitadas
+
+                # Dirección actual
+                direction = game.direction
+                if direction == last_direction:
+                    idle_moves += 1
+                else:
+                    idle_moves = 0
+                last_direction = direction
+
                 pos = (game.head.x, game.head.y)
                 positions_set.add(pos)
-                
-                # Actualizar historial de posiciones para detección de ciclos
+
                 last_positions.append(pos)
                 if len(last_positions) > max_cycle_history:
                     last_positions.pop(0)
-                
-                # Detectar ciclos repetitivos (patrones de 2, 3 o 4 movimientos)
+
                 if len(last_positions) >= 8:
                     for cycle_len in [2, 3, 4]:
                         if len(last_positions) >= cycle_len * 2:
                             recent = last_positions[-cycle_len:]
-                            previous = last_positions[-2*cycle_len:-cycle_len]
+                            previous = last_positions[-2 * cycle_len:-cycle_len]
                             if recent == previous:
                                 repeated_cycles += 1
                                 break
-                
-                # Calcular distancia a la comida (Manhattan)
+
                 curr_distance = abs(game.head.x - game.food.x) + abs(game.head.y - game.food.y)
-                
-                # Inicializar distancia previa si es la primera iteración
+
                 if prev_distance is None:
                     prev_distance = curr_distance
-                
-                # Analizar si se acerca a la comida
+
                 if curr_distance < prev_distance:
                     movement_efficiency += 1
-                    direct_path_bonus += 0.3  # Aumentado para dar más valor a moverse hacia la comida
+                    direct_path_bonus += 0.3
                     successful_food_approaches += 1
                     consecutive_approach_food += 1
                 else:
-                    # Penalización por alejarse de la comida
                     direct_path_bonus -= 0.1
                     consecutive_approach_food = 0
-                
-                # Bonus exponencial por aproximación consistente
+                    wrong_moves_to_food += 1
+
                 if consecutive_approach_food >= 3:
                     direct_path_bonus += consecutive_approach_food * 0.5
-                
+
                 prev_distance = curr_distance
-                
-                # Verificar si encontró comida
+
                 if score > prev_score:
                     foods_reached += 1
                     food_eaten_in_game += 1
-                    # Registrar cuántos pasos tomó llegar a esta comida
                     avg_steps_per_food.append(steps_since_last_food)
                     steps_since_last_food = 0
-                    
-                    # Bonus por comer comida (mayor bonus mientras más crece)
-                    food_bonus_multiplier = 1 + (food_eaten_in_game * 0.5)  # Bonificación creciente
+
+                    food_bonus_multiplier = 1 + (food_eaten_in_game * 0.5)
                     direct_path_bonus += 10.0 * food_bonus_multiplier
-                    
-                    # Reiniciar distancia para próxima comida
+
                     prev_distance = None
-                
-                # No mostrar todos los juegos (solo para visualizar el mejor)
+
                 if not show_game:
                     pygame.display.update()
-            
-            # Guardar distancia final a la comida al terminar
-            final_food_distance = curr_distance if 'curr_distance' in locals() else initial_food_distance
-            
-            # Terminar si se alcanzó el límite de pasos
-            if steps_played >= max_steps and not done:
-                done = True
-                
+
             total_score += score
             total_steps += game.steps
             unique_positions += len(positions_set)
-            
-            # Restaurar la función print original al final de cada juego
+
+            total_wrong_moves = wrong_moves_to_food
+            total_idle_moves = idle_moves
+
             if game_num > 0 or silent:
                 builtins.print = original_print
-                
-            # Mostrar resultados de este juego específico
+
             if not silent:
                 print(f"\nJuego {game_num + 1} de {exact_games} completado")
                 print(f"  - Puntuación: {score}")
                 print(f"  - Pasos totales: {steps_played}")
                 print(f"  - Comida encontrada en este juego: {food_eaten_in_game}")
                 print(f"  - Posiciones únicas visitadas: {len(positions_set)}")
-                print(f"  - Eficiencia de ruta: {(food_eaten_in_game / steps_played * 100):.2f}% (comidas/pasos)")
-        
-        # COMPONENTE 1: OBJETIVOS PRIMARIOS
-        # Puntos por comida (objetivo principal)
-        food_points = total_score * 70  # Aumentado a 70 para dar aún más prioridad a comer comida
-        
-        # Puntos por supervivencia (escalados según la longitud)
-        survival_points = total_steps * 0.3  # Reducido para no premiar tanto la supervivencia sin comer
-        
-        # COMPONENTE 2: EFICIENCIA Y COMPORTAMIENTO INTELIGENTE
-        # Eficiencia en conseguir comida
+                print(f"  - Eficiencia de ruta: {(food_eaten_in_game / steps_played * 100):.2f}%")
+
+        # COMPONENTES DE FITNESS
+
+        # Recompensa progresiva por comida
+        food_points = sum([70 + i * 10 for i in range(total_score)])
+
+        survival_points = total_steps * 0.3
+
         route_efficiency = 0
         if avg_steps_per_food:
-            # Invertimos la relación: menos pasos = mayor eficiencia
-            route_efficiency = 120 / (sum(avg_steps_per_food) / len(avg_steps_per_food) + 1)
-        
-        # Bonus por aproximación a la comida
-        food_approach_bonus = successful_food_approaches * 3  # Aumentado para premiar más el acercarse a la comida
-        
-        # COMPONENTE 3: CRECIMIENTO Y EXPLORACIÓN
-        # Bonus por exploración (evitar quedarse en áreas pequeñas)
-        exploration_bonus = unique_positions * 0.5  # Reducido ligeramente
-        
-        # Bonus por evitar paredes y colisiones
+            route_efficiency = 200 / ((sum(avg_steps_per_food) / len(avg_steps_per_food)) ** 1.2 + 1)
+
+        food_approach_bonus = successful_food_approaches * 3
+        exploration_bonus = unique_positions * 0.5
         avoidance_bonus = wall_avoidance_count * 0.5 + near_death_avoidance * 2
-        
-        # COMPONENTE 4: PENALIZACIONES
-        # Penalización por muerte temprana
+
         early_death_penalty = 0
-        if total_score == 0:  # No comió nada
-            early_death_penalty = 300  # Aumentada para penalizar más fuertemente no comer nada
-        elif total_steps < 30:  # Muerte muy temprana
+        if total_score == 0:
+            early_death_penalty = 300
+        elif total_steps < 30:
             early_death_penalty = 200
-        
-        # Penalización por movimientos repetitivos
-        repetition_penalty = repeated_cycles * 8  # Aumentado para penalizar más los ciclos
-        
-        # CÁLCULO FINAL CON PONDERACIONES OPTIMIZADAS
+
+        # Penalizaciones mejoradas
+        idle_penalty = (total_idle_moves // 10) * 5
+        wrong_direction_penalty = total_wrong_moves * 0.5
+        cycle_ratio = repeated_cycles / max(1, total_steps)
+        cycle_penalty = 0
+        if cycle_ratio > 0.1:
+            cycle_penalty = cycle_ratio * 500
+
+        repetition_penalty = repeated_cycles * 8 + cycle_penalty + idle_penalty + wrong_direction_penalty
+
         fitness = (
-            food_points +                  # Prioridad máxima a comer comida
-            survival_points +              # Valor bajo a la supervivencia
-            route_efficiency * 4.0 +       # Máxima importancia a la eficiencia
-            food_approach_bonus +          # Premiar acercarse a la comida
-            direct_path_bonus * 2.5 +      # Premiar rutas directas
-            exploration_bonus +            # Valor bajo a la exploración general
-            avoidance_bonus +              # Premiar evitar obstáculos
-            (movement_efficiency * 1.0) -  # Valor bajo al movimiento general
-            early_death_penalty -          # Fuerte penalización por muerte temprana
-            repetition_penalty             # Alta penalización por ciclos repetitivos
+            food_points +
+            survival_points +
+            route_efficiency * 4.0 +
+            food_approach_bonus +
+            direct_path_bonus * 2.5 +
+            exploration_bonus +
+            avoidance_bonus +
+            (movement_efficiency * 1.0) -
+            early_death_penalty -
+            repetition_penalty
         )
-        
-        # Resumen de la evaluación
+
         if not silent:
-            print("\n" + "="*50)
+            print("\n" + "=" * 50)
             print(f"RESUMEN DE EVALUACIÓN DEL AGENTE")
             print(f"  • Total de comida encontrada: {total_score}")
             print(f"  • Total de pasos realizados: {total_steps}")
@@ -788,16 +755,14 @@ class GeneticAlgorithm:
                 print(f"  • Promedio de pasos por comida: {sum(avg_steps_per_food) / len(avg_steps_per_food):.2f}")
             print(f"  • Posiciones únicas visitadas: {unique_positions}")
             print(f"  • Fitness calculado: {fitness:.2f}")
-            print("="*50)
-        
-        # Restaurar variables de entorno si las modificamos
+            print("=" * 50)
+
         if os_environ_copy is not None:
             os.environ.clear()
             os.environ.update(os_environ_copy)
-            
-        # Garantizar un valor mínimo positivo para mantener diversidad genética
+
         fitness = max(1.0, fitness / exact_games)
-        
+
         return fitness
     
     def selection(self, fitnesses):
