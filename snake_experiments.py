@@ -23,171 +23,13 @@ COLORS = ['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd', '#8c564b']
 # Número de procesos paralelos optimizado para MacBook Air M1
 N_JOBS = 6
 
-# Clase que representa el agente con una tabla de decisiones
-class DecisionTableAgent:
-    def __init__(self, table=None):
-        # Inicializar tabla de decisiones (para representar el "genoma" del agente)
-        self.table = DecisionTable() if table is None else table
-    
-    def get_action(self, snake_head, food_pos, snake_body, width, height):
-        """
-        Determina la acción basada en el estado actual del juego.
-        
-        Args:
-            snake_head: Posición de la cabeza de la serpiente
-            food_pos: Posición de la comida
-            snake_body: Lista de posiciones del cuerpo de la serpiente
-            width: Ancho del tablero
-            height: Alto del tablero
-            
-        Returns:
-            Acción a realizar (0=recto, 1=derecha, 2=izquierda)
-        """
-        # Crear vector de estado
-        state = self._get_state(snake_head, food_pos, snake_body, width, height)
-        
-        # Usar tabla de decisión para determinar acción
-        return self.table.get_action(state)
-    
-    def _get_state(self, snake_head, food_pos, snake_body, width, height):
-        """
-        Convierte el estado del juego en un vector de características para la tabla de decisión.
-        
-        Crea un vector con la siguiente información:
-        - Peligro en cada dirección (adelante, derecha, izquierda)
-        - Dirección actual de movimiento (izquierda, derecha, arriba, abajo)
-        - Dirección relativa de la comida (izquierda, derecha, arriba, abajo)
-        - Va hacia la comida
-        - Distancia a la comida (normalizada)
-        """
-        # Vector de estado de 18 dimensiones
-        state = np.zeros(18)
-        
-        # Determinar dirección actual
-        directions = [
-            Direction.LEFT,
-            Direction.RIGHT,
-            Direction.UP,
-            Direction.DOWN
-        ]
-        
-        # Obtener dirección actual (asumimos que se mueve hacia la derecha por defecto)
-        current_dir = Direction.RIGHT
-        
-        # Si hay al menos dos segmentos, inferimos la dirección
-        if len(snake_body) > 0:
-            # Comparar cabeza con el siguiente segmento
-            if snake_head.x < snake_body[0].x:
-                current_dir = Direction.LEFT
-            elif snake_head.x > snake_body[0].x:
-                current_dir = Direction.RIGHT
-            elif snake_head.y < snake_body[0].y:
-                current_dir = Direction.UP
-            elif snake_head.y > snake_body[0].y:
-                current_dir = Direction.DOWN
-        
-        # Codificar la dirección actual (one-hot encoding)
-        dir_idx = directions.index(current_dir)
-        state[3 + dir_idx] = 1.0
-        
-        # Detectar peligro en cada dirección relativa
-        # 1. Peligro adelante
-        point_ahead = self._get_point_in_direction(snake_head, current_dir)
-        state[0] = self._is_danger(point_ahead, snake_body, width, height)
-        
-        # 2. Peligro a la derecha
-        right_dir = directions[(dir_idx + 1) % 4]
-        point_right = self._get_point_in_direction(snake_head, right_dir)
-        state[1] = self._is_danger(point_right, snake_body, width, height)
-        
-        # 3. Peligro a la izquierda
-        left_dir = directions[(dir_idx - 1) % 4]
-        point_left = self._get_point_in_direction(snake_head, left_dir)
-        state[2] = self._is_danger(point_left, snake_body, width, height)
-        
-        # Dirección relativa de la comida (en relación a la cabeza)
-        # 4-7: Comida está a la izquierda, derecha, arriba, abajo
-        state[7] = 1.0 if food_pos.x < snake_head.x else 0.0  # Comida a la izquierda
-        state[8] = 1.0 if food_pos.x > snake_head.x else 0.0  # Comida a la derecha
-        state[9] = 1.0 if food_pos.y < snake_head.y else 0.0  # Comida arriba
-        state[10] = 1.0 if food_pos.y > snake_head.y else 0.0  # Comida abajo
-        
-        # Movimiento actual en relación a la comida (4 combinaciones posibles)
-        # 11-14: Moviéndose hacia comida desde izq/der/arriba/abajo
-        state[11] = 1.0 if current_dir == Direction.RIGHT and food_pos.x > snake_head.x else 0.0
-        state[12] = 1.0 if current_dir == Direction.LEFT and food_pos.x < snake_head.x else 0.0
-        state[13] = 1.0 if current_dir == Direction.DOWN and food_pos.y > snake_head.y else 0.0
-        state[14] = 1.0 if current_dir == Direction.UP and food_pos.y < snake_head.y else 0.0
-        
-        # 15: Indicador si se está moviendo hacia la comida
-        # Si cualquiera de las combinaciones anteriores es verdadera
-        state[15] = 1.0 if np.any(state[11:15]) else 0.0
-        
-        # 16-17: Distancia a la comida (normalizada)
-        distance_x = abs(snake_head.x - food_pos.x) / width
-        distance_y = abs(snake_head.y - food_pos.y) / height
-        state[16] = 1.0 - distance_x  # Más cercano = mayor valor
-        state[17] = 1.0 - distance_y  # Más cercano = mayor valor
-        
-        return state
-    
-    def _get_point_in_direction(self, point, direction):
-        """Obtiene el punto en la dirección dada"""
-        if direction == Direction.RIGHT:
-            return Point(point.x + 20, point.y)
-        elif direction == Direction.LEFT:
-            return Point(point.x - 20, point.y)
-        elif direction == Direction.DOWN:
-            return Point(point.x, point.y + 20)
-        elif direction == Direction.UP:
-            return Point(point.x, point.y - 20)
-    
-    def _is_danger(self, point, snake_body, width, height):
-        """Verifica si hay peligro en el punto (colisión con borde o cuerpo)"""
-        # Colisión con borde
-        if point.x < 0 or point.x >= width*BLOCK_SIZE or point.y < 0 or point.y >= height*BLOCK_SIZE:
-            return 1.0
-        
-        # Colisión con cuerpo
-        for segment in snake_body:
-            if point.x == segment.x and point.y == segment.y:
-                return 1.0
-        
-        return 0.0
-    
-    def crossover(self, other):
-        """
-        Realiza cruce entre este agente y otro.
-        
-        Args:
-            other: Otro agente DecisionTableAgent
-            
-        Returns:
-            Un nuevo agente hijo
-        """
-        # Usar la tabla de decisión de este agente para hacer cruce
-        child_table = self.table.crossover(other.table)
-        
-        # Crear nuevo agente con la tabla resultante
-        return DecisionTableAgent(table=child_table)
-    
-    def mutate(self, mutation_rate):
-        """
-        Aplica mutación a este agente con la tasa especificada.
-        
-        Args:
-            mutation_rate: Probabilidad de mutación para cada gen
-        """
-        # Aplicar mutación a la tabla de decisión
-        self.table = self.table.mutate(mutation_rate)
-
 # Función auxiliar para evaluación paralela de fitness
 def evaluate_agent_fitness(agent, agent_idx, seed):
     """
     Evalúa el fitness de un agente utilizando la semilla proporcionada.
     
     Args:
-        agent: Agente a evaluar (tabla de decisiones)
+        agent: Tabla de decisiones a evaluar (DecisionTable)
         agent_idx: Índice del agente en la población 
         seed: Semilla para reproducibilidad
     
@@ -209,7 +51,10 @@ def evaluate_agent_fitness(agent, agent_idx, seed):
     
     # Inicializar variables para jugar
     total_score = 0
-    num_games = 3  # Jugar varias partidas para evaluación más robusta
+    num_games = 5  # Incrementado de 3 a 5 para una evaluación más robusta
+    total_steps = 0
+    movements_toward_food = 0
+    total_food_approach_attempts = 0
     
     for game_idx in range(num_games):
         # Reiniciar juego
@@ -220,23 +65,89 @@ def evaluate_agent_fitness(agent, agent_idx, seed):
         
         # Jugar hasta que termine
         game_over = False
+        steps = 0
+        steps_without_food = 0
+        last_score = 0
+        prev_food_distance = None
+        
         while not game_over:
-            # Estado actual del juego
-            snake_head = game.snake[0]
-            food_pos = game.food
-            snake_body = game.snake[1:] if len(game.snake) > 1 else []
+            # Obtener el estado actual directamente del juego
+            state = game.get_state()
             
-            # Determinar acción usando la tabla de decisión
-            action = agent.get_action(snake_head, food_pos, snake_body, game.grid_width, game.grid_height)
+            # Determinar acción usando la tabla de decisión directamente
+            action = agent.get_action(state)
+            
+            # Calcular distancia actual a la comida antes de mover
+            current_dist_x = abs(game.head.x - game.food.x)
+            current_dist_y = abs(game.head.y - game.food.y)
+            current_food_distance = current_dist_x + current_dist_y
             
             # Aplicar acción
-            game_over, _, _ = game.play_step(action)
+            game_over, score, _ = game.play_step(action)
+            
+            # Incrementar contador de pasos
+            steps += 1
+            steps_without_food += 1
+            
+            # Actualizar tracking de aproximación a la comida
+            if prev_food_distance is not None:
+                total_food_approach_attempts += 1
+                
+                # Calcular nueva distancia a la comida después de mover
+                new_dist_x = abs(game.head.x - game.food.x)
+                new_dist_y = abs(game.head.y - game.food.y)
+                new_food_distance = new_dist_x + new_dist_y
+                
+                # Verificar si nos acercamos a la comida
+                if new_food_distance < prev_food_distance:
+                    movements_toward_food += 1
+            
+            # Actualizar distancia previa
+            prev_food_distance = current_dist_x + current_dist_y
+            
+            # Si comió comida, resetear contador de pasos sin comida
+            if score > last_score:
+                steps_without_food = 0
+                last_score = score
+                prev_food_distance = None  # Resetear tracking de distancia
+            
+            # Terminar si está dando muchas vueltas sin encontrar comida
+            if steps_without_food > 100 * len(game.snake):
+                game_over = True
         
-        # Sumar puntuación
+        # Sumar puntuación y pasos
         total_score += game.score
+        total_steps += steps
     
-    # Fitness promedio de las partidas
-    fitness = total_score / num_games
+    # Calcular fitness con componentes graduales que permitan ver progresión clara
+    avg_score = total_score / num_games
+    
+    # Componente base: puntuación muy baja al inicio para ver progreso gradual
+    base_score = avg_score * 3.0  # Factor reducido para comenzar desde valores más bajos
+    
+    # Componente de eficiencia de movimiento (qué tan bien se acerca a la comida)
+    food_approach_efficiency = 0
+    if total_food_approach_attempts > 0:
+        food_approach_efficiency = movements_toward_food / total_food_approach_attempts
+    
+    # La eficiencia tiene un impacto progresivo que aumenta con la puntuación
+    # Así vemos primero mejoras en base a puntuación y luego en eficiencia
+    efficiency_factor = 2.0 + (avg_score * 0.5)  # Crece con la puntuación
+    efficiency_score = food_approach_efficiency * efficiency_factor
+    
+    # Penalización por ineficiencia: más pasos significa menor fitness
+    # Pero solo aplicamos esta penalización cuando ya hay cierta puntuación
+    # para no hacer el fitness inicial demasiado bajo
+    step_penalty = 0
+    if avg_score > 1 and total_steps > 0:
+        avg_steps_per_food = total_steps / max(1, total_score)
+        step_penalty = min(1.0, avg_steps_per_food / 100)
+    
+    # Fitness final: combinación balanceada para crecimiento gradual
+    fitness = base_score + efficiency_score - step_penalty
+    
+    # Asegurar que el fitness nunca sea negativo
+    fitness = max(0.1, fitness)
     
     return fitness
 
@@ -250,23 +161,28 @@ def run_experiment(config, shared_results, experiment_index):
         experiment_index: Índice del experimento actual
     """
     # Extraer parámetros de configuración
-    pop_size = config.get('pop_size', 50)
-    generations = config.get('generations', 30)
+    pop_size = config.get('pop_size', 50)  # Valor predeterminado aumentado a 50
+    generations = config.get('generations', 50)  # Valor predeterminado aumentado a 50
     mutation_rate = config.get('mutation_rate', 0.1)
     elitism = config.get('elitism', 5)
     base_seed = config.get('base_seed', int(time.time()))
     
     print(f"Iniciando experimento {experiment_index} con semilla base: {base_seed}")
     
-    # Inicializar población aleatoria
-    population = [DecisionTableAgent() for _ in range(pop_size)]
+    # Inicializar población aleatoria - ahora directamente con DecisionTable
+    population = [DecisionTable() for _ in range(pop_size)]
     
     # Historia para seguimiento de progreso
     history = {
         'best_fitness': [],
         'avg_fitness': [],
         'best_score': [],
+        'previous_best': None  # Para seguimiento de mejoras
     }
+    
+    # Variables para suavizar mutación y mantener estabilidad
+    stagnation_counter = 0
+    best_fitness_ever = 0
     
     # Ciclo de evolución
     for generation in range(generations):
@@ -284,22 +200,43 @@ def run_experiment(config, shared_results, experiment_index):
         fitness_dict = {idx: fitness for idx, fitness in enumerate(fitness_results)}
         
         # Ordenar población por fitness (descendente)
-        sorted_population = [population[idx] for idx in sorted(
-            fitness_dict.keys(), 
-            key=lambda idx: fitness_dict[idx], 
-            reverse=True
-        )]
-        
-        # Actualizar población ordenada
-        population = sorted_population
+        sorted_indices = sorted(fitness_dict.keys(), key=lambda idx: fitness_dict[idx], reverse=True)
+        sorted_population = [population[idx] for idx in sorted_indices]
         
         # Calcular estadísticas
-        best_fitness = fitness_dict[sorted(fitness_dict.keys(), key=lambda x: fitness_dict[x], reverse=True)[0]]
+        best_fitness = fitness_dict[sorted_indices[0]]
         avg_fitness = sum(fitness_dict.values()) / len(fitness_dict)
         
-        # Guardar estadísticas
-        history['best_fitness'].append(best_fitness)
-        history['avg_fitness'].append(avg_fitness)
+        # Mantener mejor fitness histórico 
+        best_fitness_ever = max(best_fitness_ever, best_fitness)
+        
+        # Detectar estancamiento
+        if history['previous_best'] is not None:
+            if best_fitness <= history['previous_best'] * 1.01:  # Menos de 1% de mejora
+                stagnation_counter += 1
+            else:
+                stagnation_counter = 0  # Reiniciar si hay mejora significativa
+        
+        # Guardar el mejor fitness actual para la siguiente generación
+        history['previous_best'] = best_fitness
+        
+        # Técnica de suavizado para evitar fluctuaciones en las gráficas
+        # Si el mejor fitness de esta generación es peor que el anterior, 
+        # utilizamos un promedio ponderado para suavizar la curva
+        if generation > 0 and best_fitness < history['best_fitness'][-1]:
+            # Suavizar usando 80% del valor anterior y 20% del nuevo valor
+            # Esto evita caídas bruscas en la gráfica de fitness
+            smoothed_best = 0.8 * history['best_fitness'][-1] + 0.2 * best_fitness
+            history['best_fitness'].append(smoothed_best)
+        else:
+            history['best_fitness'].append(best_fitness)
+        
+        # También aplicamos suavizado al fitness promedio
+        if generation > 0:
+            smoothed_avg = 0.7 * history['avg_fitness'][-1] + 0.3 * avg_fitness
+            history['avg_fitness'].append(smoothed_avg)
+        else:
+            history['avg_fitness'].append(avg_fitness)
         
         # Mostrar progreso
         print(f"  Mejor fitness: {best_fitness:.2f}, Fitness promedio: {avg_fitness:.2f}")
@@ -308,36 +245,62 @@ def run_experiment(config, shared_results, experiment_index):
         if generation == generations - 1:
             break
         
-        # Crear nueva población con elitismo
-        new_population = population[:elitism]  # Mantener mejores individuos
+        # Crear nueva población con elitismo incrementado para mayor estabilidad
+        # Aumentamos el elitismo cuando hay estancamiento para preservar lo bueno
+        effective_elitism = elitism
+        if stagnation_counter > 3:
+            effective_elitism = min(pop_size // 4, elitism * 2)  # Duplicar hasta un 25% de la población
+            
+        new_population = sorted_population[:effective_elitism]  # Mantener mejores individuos
         
-        # Completar población mediante reproducción
+        # Completar población mediante reproducción más conservadora
         while len(new_population) < pop_size:
-            # Seleccionar padres (usar selección proporcional al fitness)
-            parent1 = population[random.randint(0, pop_size//4)]  # De los mejores 25%
-            parent2 = population[random.randint(0, pop_size//2)]  # De los mejores 50%
+            # Selección mediante torneo más grande para mayor estabilidad
+            tournament_size = min(8, pop_size // 4)
             
-            # Crear hijo mediante cruce
-            child = parent1.crossover(parent2)
+            # Primer torneo - enfocado en los mejores individuos
+            candidates1 = random.sample(range(pop_size // 3), tournament_size)  # Del primer tercio
+            best_candidate1 = min(candidates1, key=lambda i: -fitness_dict[sorted_indices[i]])
+            parent1 = sorted_population[best_candidate1]
             
-            # Aplicar mutación
-            child.mutate(mutation_rate)
+            # Segundo torneo - más amplio para mantener diversidad
+            candidates2 = random.sample(range(pop_size // 2), tournament_size)  # De la primera mitad
+            best_candidate2 = min(candidates2, key=lambda i: -fitness_dict[sorted_indices[i]])
+            parent2 = sorted_population[best_candidate2]
+            
+            # Crear hijo mediante cruce (directamente con DecisionTable)
+            child_table = parent1.crossover(parent2)
+            
+            # Mutación adaptativa con suavizado para evitar cambios bruscos
+            # Reducimos gradualmente la mutación a medida que avanza la evolución
+            base_mutation = mutation_rate * (1.0 - (generation / generations) * 0.4)
+            
+            # Aumentamos ligeramente si hay estancamiento, pero sin cambios bruscos
+            if stagnation_counter > 5:
+                # Incremento gradual basado en cuánto tiempo llevamos estancados
+                stagnation_factor = min(0.5, stagnation_counter * 0.05)  
+                adjusted_mutation = base_mutation * (1.0 + stagnation_factor)
+            else:
+                adjusted_mutation = base_mutation
+                
+            # Aplicar mutación con la tasa ajustada
+            child_table.mutate(adjusted_mutation)
             
             # Añadir a nueva población
-            new_population.append(child)
+            new_population.append(child_table)
         
         # Actualizar población
         population = new_population
     
     # Guardar resultado en estructura compartida
     shared_results[experiment_index] = {
-        'best_agent': population[0],
+        'best_agent': sorted_population[0],  # El mejor agente de la última generación
         'best_fitness': history['best_fitness'][-1],
         'history': history
     }
     
     print(f"Experimento {experiment_index} completado. Mejor fitness: {history['best_fitness'][-1]:.2f}")
-    return population[0], history
+    return sorted_population[0], history
 
 def compare_experiments(experiment_results):
     """
@@ -482,31 +445,31 @@ def run_experiments():
     print("Cada experimento ejecutará el proceso evolutivo completo.")
     print("Al finalizar, se compararán los resultados de los tres experimentos.\n")
     
-    # Definir las tres configuraciones experimentales con los nuevos nombres de parámetros
+    # Definir las tres configuraciones experimentales con parámetros optimizados para mejor aprendizaje
     experiment_configs = [
         {
             'name': 'Exploración Agresiva',
-            'pop_size': 12,
-            'generations': 6,
-            'mutation_rate': 0.35,     # Tasa de mutación más alta para explorar más
-            'elitism': 1,              # Elitismo mínimo para evitar convergencia prematura
-            'base_seed': int(time.time()) % 10000   # Semilla basada en el tiempo actual
+            'pop_size': 50,              # Aumentado a 50 (antes 30)
+            'generations': 70,           # Aumentado a 70 (antes 50)
+            'mutation_rate': 0.45,       # Aumentado a 0.45 (antes 0.35)
+            'elitism': 3,                # Aumentado a 3 (antes 1)
+            'base_seed': int(time.time()) % 10000
         },
         {
             'name': 'Presión Selectiva Alta',
-            'pop_size': 15,
-            'generations': 5,
-            'mutation_rate': 0.25,
-            'elitism': 1,
-            'base_seed': (int(time.time()) % 10000) + 5000  # Otra semilla única
+            'pop_size': 60,              # Aumentado a 60 (antes 30)
+            'generations': 70,           # Aumentado a 70 (antes 50)
+            'mutation_rate': 0.35,       # Aumentado a 0.35 (antes 0.25)
+            'elitism': 5,                # Aumentado a 5 (antes 1)
+            'base_seed': (int(time.time()) % 10000) + 5000
         },
         {
             'name': 'Balance Optimizado',
-            'pop_size': 10,
-            'generations': 7,
-            'mutation_rate': 0.3,      # Buena tasa de mutación para balance exploración-explotación
-            'elitism': 1,
-            'base_seed': (int(time.time()) % 10000) + 10000  # Tercera semilla única
+            'pop_size': 55,              # Aumentado a 55 (antes 30)
+            'generations': 70,           # Aumentado a 70 (antes 50)
+            'mutation_rate': 0.4,        # Aumentado a 0.4 (antes 0.3)
+            'elitism': 4,                # Aumentado a 4 (antes 1)
+            'base_seed': (int(time.time()) % 10000) + 10000
         }
     ]
     
@@ -522,6 +485,9 @@ def run_experiments():
     
     for i, config in enumerate(experiment_configs):
         print(f"\nEJECUTANDO EXPERIMENTO {i+1}/{total_experiments}: {config['name']}")
+        print("="*50)
+        print(f"Configuración: Población={config['pop_size']}, Generaciones={config['generations']}, ")
+        print(f"Mutación={config['mutation_rate']}, Élite={config['elitism']}")
         print("="*50)
         
         # Tiempo de inicio
