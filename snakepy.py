@@ -550,7 +550,7 @@ class GeneticAlgorithm:
         """Inicializa la población con tablas de decisión aleatorias"""
         self.population = [DecisionTable() for _ in range(self.population_size)]
     
-    def fitness(self, agent, num_games=5, show_game=False, silent=False):
+    def fitness(self, agent, num_games=3, show_game=False, silent=False):
         """Evalúa el fitness de un agente sobre exactamente 3 juegos"""
         total_score = 0
         total_steps = 0

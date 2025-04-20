@@ -346,24 +346,24 @@ def run_experiments():
     experiment_configs = [
         {
             'name': 'Exploración Agresiva',
-            'pop_size': 50,              # Aumentado a 50 (antes 30)
-            'generations': 70,           # Aumentado a 70 (antes 50)
+            'pop_size': 30,              # Aumentado a 50 (antes 30)
+            'generations': 50,           # Aumentado a 70 (antes 50)
             'mutation_rate': 0.45,       # Aumentado a 0.45 (antes 0.35)
             'elitism': 3,                # Aumentado a 3 (antes 1)
             'base_seed': int(time.time()) % 10000
         },
         {
             'name': 'Presión Selectiva Alta',
-            'pop_size': 60,              # Aumentado a 60 (antes 30)
-            'generations': 70,           # Aumentado a 70 (antes 50)
+            'pop_size': 30,              # Aumentado a 60 (antes 30)
+            'generations': 50,           # Aumentado a 70 (antes 50)
             'mutation_rate': 0.35,       # Aumentado a 0.35 (antes 0.25)
             'elitism': 5,                # Aumentado a 5 (antes 1)
             'base_seed': (int(time.time()) % 10000) + 5000
         },
         {
             'name': 'Balance Optimizado',
-            'pop_size': 55,              # Aumentado a 55 (antes 30)
-            'generations': 70,           # Aumentado a 70 (antes 50)
+            'pop_size': 30,              # Aumentado a 55 (antes 30)
+            'generations': 50,           # Aumentado a 70 (antes 50)
             'mutation_rate': 0.4,        # Aumentado a 0.4 (antes 0.3)
             'elitism': 4,                # Aumentado a 4 (antes 1)
             'base_seed': (int(time.time()) % 10000) + 10000
