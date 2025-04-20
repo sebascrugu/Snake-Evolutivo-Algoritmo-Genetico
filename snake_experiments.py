@@ -24,132 +24,29 @@ COLORS = ['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd', '#8c564b']
 N_JOBS = 6
 
 # Función auxiliar para evaluación paralela de fitness
-def evaluate_agent_fitness(agent, agent_idx, seed):
+def evaluate_agent_fitness(agent, agent_index, seed):
     """
-    Evalúa el fitness de un agente utilizando la semilla proporcionada.
+    Evalúa el fitness de un agente en el juego Snake.
     
     Args:
-        agent: Tabla de decisiones a evaluar (DecisionTable)
-        agent_idx: Índice del agente en la población 
-        seed: Semilla para reproducibilidad
+        agent: Agente a evaluar
+        agent_index: Índice del agente
+        seed: Semilla para la aleatoriedad
     
     Returns:
-        Valor de fitness del agente
+        Fitness del agente
     """
-    # Crear semilla única para cada agente
-    agent_seed = seed + agent_idx
+    agent_seed = seed + agent_index
     random.seed(agent_seed)
     np.random.seed(agent_seed)
-    
-    # Crear un juego de Snake en modo silencioso (sin interfaz gráfica)
-    game = SnakeGame(
-        width=15,
-        height=15,
-        headless=True,
-        ai_control=True
-    )
-    
-    # Inicializar variables para jugar
-    total_score = 0
-    num_games = 5  # Incrementado de 3 a 5 para una evaluación más robusta
-    total_steps = 0
-    movements_toward_food = 0
-    total_food_approach_attempts = 0
-    
-    for game_idx in range(num_games):
-        # Reiniciar juego
-        game.reset()
-        game_seed = agent_seed + game_idx * 1000
-        random.seed(game_seed)
-        np.random.seed(game_seed)
-        
-        # Jugar hasta que termine
-        game_over = False
-        steps = 0
-        steps_without_food = 0
-        last_score = 0
-        prev_food_distance = None
-        
-        while not game_over:
-            # Obtener el estado actual directamente del juego
-            state = game.get_state()
-            
-            # Determinar acción usando la tabla de decisión directamente
-            action = agent.get_action(state)
-            
-            # Calcular distancia actual a la comida antes de mover
-            current_dist_x = abs(game.head.x - game.food.x)
-            current_dist_y = abs(game.head.y - game.food.y)
-            current_food_distance = current_dist_x + current_dist_y
-            
-            # Aplicar acción
-            game_over, score, _ = game.play_step(action)
-            
-            # Incrementar contador de pasos
-            steps += 1
-            steps_without_food += 1
-            
-            # Actualizar tracking de aproximación a la comida
-            if prev_food_distance is not None:
-                total_food_approach_attempts += 1
-                
-                # Calcular nueva distancia a la comida después de mover
-                new_dist_x = abs(game.head.x - game.food.x)
-                new_dist_y = abs(game.head.y - game.food.y)
-                new_food_distance = new_dist_x + new_dist_y
-                
-                # Verificar si nos acercamos a la comida
-                if new_food_distance < prev_food_distance:
-                    movements_toward_food += 1
-            
-            # Actualizar distancia previa
-            prev_food_distance = current_dist_x + current_dist_y
-            
-            # Si comió comida, resetear contador de pasos sin comida
-            if score > last_score:
-                steps_without_food = 0
-                last_score = score
-                prev_food_distance = None  # Resetear tracking de distancia
-            
-            # Terminar si está dando muchas vueltas sin encontrar comida
-            if steps_without_food > 100 * len(game.snake):
-                game_over = True
-        
-        # Sumar puntuación y pasos
-        total_score += game.score
-        total_steps += steps
-    
-    # Calcular fitness con componentes graduales que permitan ver progresión clara
-    avg_score = total_score / num_games
-    
-    # Componente base: puntuación muy baja al inicio para ver progreso gradual
-    base_score = avg_score * 3.0  # Factor reducido para comenzar desde valores más bajos
-    
-    # Componente de eficiencia de movimiento (qué tan bien se acerca a la comida)
-    food_approach_efficiency = 0
-    if total_food_approach_attempts > 0:
-        food_approach_efficiency = movements_toward_food / total_food_approach_attempts
-    
-    # La eficiencia tiene un impacto progresivo que aumenta con la puntuación
-    # Así vemos primero mejoras en base a puntuación y luego en eficiencia
-    efficiency_factor = 2.0 + (avg_score * 0.5)  # Crece con la puntuación
-    efficiency_score = food_approach_efficiency * efficiency_factor
-    
-    # Penalización por ineficiencia: más pasos significa menor fitness
-    # Pero solo aplicamos esta penalización cuando ya hay cierta puntuación
-    # para no hacer el fitness inicial demasiado bajo
-    step_penalty = 0
-    if avg_score > 1 and total_steps > 0:
-        avg_steps_per_food = total_steps / max(1, total_score)
-        step_penalty = min(1.0, avg_steps_per_food / 100)
-    
-    # Fitness final: combinación balanceada para crecimiento gradual
-    fitness = base_score + efficiency_score - step_penalty
-    
-    # Asegurar que el fitness nunca sea negativo
-    fitness = max(0.1, fitness)
-    
-    return fitness
+
+    #Crear semilla única para cada agente
+    ga = GeneticAlgorithm()
+
+    fitness_value = ga.fitness(agent, num_games=3, show_game=False, silent=True)
+
+    return fitness_value
+
 
 def run_experiment(config, shared_results, experiment_index):
     """

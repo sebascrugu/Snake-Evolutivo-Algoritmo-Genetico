@@ -552,8 +552,6 @@ class GeneticAlgorithm:
     
     def fitness(self, agent, num_games=5, show_game=False, silent=False):
         """Evalúa el fitness de un agente sobre exactamente 3 juegos"""
-        import os  # Asegurar que 'os' esté disponible en esta función
-        
         total_score = 0
         total_steps = 0
         movement_efficiency = 0  # Eficiencia de movimiento
@@ -701,7 +699,7 @@ class GeneticAlgorithm:
                     prev_distance = None
                 
                 # No mostrar todos los juegos (solo para visualizar el mejor)
-                if not show_game:
+                if show_game:
                     pygame.display.update()
             
             # Guardar distancia final a la comida al terminar
