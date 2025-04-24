@@ -503,7 +503,9 @@ class DecisionTable:
     
     def mutate(self, mutation_rate):
         """
-        Aplica mutación a esta tabla con la tasa especificada.
+        Aplica mutación simple a esta tabla con la tasa especificada.
+        Este método es más simple que el de GeneticAlgorithm y se usa
+        para mutaciones directas del agente.
         
         Args:
             mutation_rate: Probabilidad de mutación para cada gen
@@ -546,12 +548,20 @@ class GeneticAlgorithm:
         self.best_fitness_history = []
         self.avg_fitness_history = []
         
+        # Variables para mecanismos adaptativos
+        self.stagnation_counter = 0        # Contador de generaciones sin mejora significativa
+        self.improvement_rate_history = [] # Historial de tasas de mejora
+        self.best_fitness_ever = 0         # Mejor fitness encontrado hasta ahora
+        self.tournament_size = 5           # Tamaño inicial del torneo
+        self.offspring_count = {}          # Contador de descendientes por individuo
+        self.diversity_threshold = 0.1     # Umbral de diversidad para estrategias correctivas
+        
     def initialize_population(self):
         """Inicializa la población con tablas de decisión aleatorias"""
         self.population = [DecisionTable() for _ in range(self.population_size)]
     
-    def fitness(self, agent, num_games=3, show_game=False, silent=False):
-        """Evalúa el fitness de un agente sobre exactamente 3 juegos"""
+    def fitness(self, agent, num_games=7, show_game=False, silent=False):
+        """Evalúa el fitness de un agente sobre el número de juegos especificado con semillas consistentes"""
         total_score = 0
         total_steps = 0
         movement_efficiency = 0  # Eficiencia de movimiento
@@ -559,22 +569,30 @@ class GeneticAlgorithm:
         foods_reached = 0        # Comidas alcanzadas (total acumulado)
         avg_steps_per_food = []  # Pasos promedio para alcanzar comida
         
-        # IMPORTANTE: Siempre jugar exactamente 3 juegos, independientemente del parámetro num_games
-        exact_games = 3
+        # Nuevas variables para el reequilibrio de fitness
+        foods_per_game = []      # Comida obtenida en cada juego
+        consecutive_avoidance = 0 # Contador de evitaciones consecutivas
+        max_snake_length = 3     # Longitud máxima alcanzada por la serpiente
+        
+        # Semillas fijas para evaluación consistente
+        base_seed = 42  # Semilla base arbitraria pero fija
+        seeds = [base_seed + i * 1000 for i in range(num_games)]  # Generar semillas espaciadas
+        
         if not silent:
-            print(f"\nIniciando evaluación de agente en {exact_games} juegos...")
+            print(f"\nIniciando evaluación de agente en {num_games} juegos...")
         
         # Control de visualización para procesos en paralelo
-        # Deshabilitar temporalmente la visualización de Pygame si estamos en modo silencioso (para paralelización)
+        # Deshabilitar temporalmente la visualización de Pygame si estamos en modo silencioso
         os_environ_copy = None
         if silent and 'SDL_VIDEODRIVER' not in os.environ:
             os_environ_copy = os.environ.copy()
             os.environ['SDL_VIDEODRIVER'] = 'dummy'  # Usar driver nulo para Pygame
             
-        # Jugar exactamente 3 juegos para evaluar al agente
-        for game_num in range(exact_games):
-            # Usar diferentes semillas para evaluar con más robustez
-            random.seed(game_num + int(time.time()) % 1000)
+        # Jugar el número especificado de juegos para evaluar al agente
+        for game_num in range(num_games):
+            # Usar semilla fija para este juego
+            random.seed(seeds[game_num])
+            np.random.seed(seeds[game_num])
             
             # Crear un nuevo juego para cada evaluación
             # Desactivamos los mensajes de depuración durante la evaluación
@@ -614,7 +632,7 @@ class GeneticAlgorithm:
             # Distancia inicial a la comida
             initial_food_distance = abs(game.head.x - game.food.x) + abs(game.head.y - game.food.y)
             
-            print(f"Jugando partida {game_num + 1} de {exact_games}...")
+            print(f"Jugando partida {game_num + 1} de {num_games}...")
             
             # Jugar hasta que termine
             while not done and steps_played < max_steps:
@@ -635,6 +653,16 @@ class GeneticAlgorithm:
                 if danger_ahead and action != 0:  # No va hacia adelante cuando hay peligro
                     wall_avoidance_count += 1
                     near_death_avoidance += 1
+                    consecutive_avoidance += 1
+                elif danger_right and action != 1:  # No va a la derecha cuando hay peligro
+                    wall_avoidance_count += 1
+                    consecutive_avoidance += 1
+                elif danger_left and action != 2:  # No va a la izquierda cuando hay peligro
+                    wall_avoidance_count += 1
+                    consecutive_avoidance += 1
+                else:
+                    # Reiniciar contador si no evitó ningún peligro
+                    consecutive_avoidance = 0
                 
                 done, score, _ = game.play_step(action)
                 steps_played += 1
@@ -713,13 +741,19 @@ class GeneticAlgorithm:
             total_steps += game.steps
             unique_positions += len(positions_set)
             
+            # Registrar comida comida en este juego para análisis de consistencia
+            foods_per_game.append(food_eaten_in_game)
+            
+            # Actualizar la longitud máxima alcanzada
+            max_snake_length = max(max_snake_length, 3 + food_eaten_in_game)
+            
             # Restaurar la función print original al final de cada juego
             if game_num > 0 or silent:
                 builtins.print = original_print
                 
             # Mostrar resultados de este juego específico
             if not silent:
-                print(f"\nJuego {game_num + 1} de {exact_games} completado")
+                print(f"\nJuego {game_num + 1} de {num_games} completado")
                 print(f"  - Puntuación: {score}")
                 print(f"  - Pasos totales: {steps_played}")
                 print(f"  - Comida encontrada en este juego: {food_eaten_in_game}")
@@ -727,57 +761,112 @@ class GeneticAlgorithm:
                 print(f"  - Eficiencia de ruta: {(food_eaten_in_game / steps_played * 100):.2f}% (comidas/pasos)")
         
         # COMPONENTE 1: OBJETIVOS PRIMARIOS
-        # Puntos por comida (objetivo principal)
-        food_points = total_score * 70  # Aumentado a 70 para dar aún más prioridad a comer comida
+        # Puntos por comida (objetivo principal) - REEQUILIBRADO
+        base_food_value = 45  # Reducido de 70 a 45 para balancear mejor con otros componentes
         
-        # Puntos por supervivencia (escalados según la longitud)
-        survival_points = total_steps * 0.3  # Reducido para no premiar tanto la supervivencia sin comer
+        # Valor incremental por cada comida adicional (comida más valiosa progresivamente)
+        incremental_food_points = 0
+        for i in range(total_score):
+            # Cada comida vale un 10% más que la anterior
+            food_value = base_food_value * (1 + (i * 0.1))
+            incremental_food_points += food_value
+            
+        food_points = incremental_food_points if total_score > 0 else 0
+        
+        # Puntos por supervivencia (escalados según la longitud) - REEQUILIBRADO
+        # Ahora es más significativo para compensar la reducción en valor de comida
+        survival_points = total_steps * 0.5
         
         # COMPONENTE 2: EFICIENCIA Y COMPORTAMIENTO INTELIGENTE
-        # Eficiencia en conseguir comida
+        # Eficiencia en conseguir comida - REEQUILIBRADO
         route_efficiency = 0
-        if avg_steps_per_food:
-            # Invertimos la relación: menos pasos = mayor eficiencia
-            route_efficiency = 120 / (sum(avg_steps_per_food) / len(avg_steps_per_food) + 1)
+        food_points_per_step = 0
+        if total_steps > 0:
+            # Nueva métrica de eficiencia: puntos por paso
+            food_points_per_step = (total_score / max(1, total_steps)) * 500
+            
+            # Mantener la métrica anterior pero con menos peso
+            if avg_steps_per_food:
+                route_efficiency = 100 / (sum(avg_steps_per_food) / len(avg_steps_per_food) + 1)
         
         # Bonus por aproximación a la comida
-        food_approach_bonus = successful_food_approaches * 3  # Aumentado para premiar más el acercarse a la comida
+        food_approach_bonus = successful_food_approaches * 3
         
         # COMPONENTE 3: CRECIMIENTO Y EXPLORACIÓN
         # Bonus por exploración (evitar quedarse en áreas pequeñas)
-        exploration_bonus = unique_positions * 0.5  # Reducido ligeramente
+        exploration_bonus = unique_positions * 0.5
         
-        # Bonus por evitar paredes y colisiones
-        avoidance_bonus = wall_avoidance_count * 0.5 + near_death_avoidance * 2
+        # NUEVO: Bonificación por consistencia entre juegos
+        # Calculamos la desviación estándar de comida entre juegos
+        # Una baja desviación indica mayor consistencia
+        food_consistency_bonus = 0
+        if len(foods_per_game) > 1:
+            # Si hay más de un juego, calcular desviación estándar
+            std_dev = np.std(foods_per_game)
+            # Menor desviación = mayor bonificación
+            food_consistency_bonus = 20 * (1 / (1 + std_dev))
+        
+        # Bonus por evitar paredes y colisiones - AUMENTADO SIGNIFICATIVAMENTE
+        # Aumentamos dramáticamente el valor de evitación de colisiones
+        basic_avoidance = wall_avoidance_count * 4.0  # Aumentado de 0.5 a 4.0
+        critical_avoidance = near_death_avoidance * 10.0  # Aumentado de 2.0 a 10.0
+        
+        # NUEVO: Bonificación por secuencias exitosas de evitación
+        consecutive_avoidance_bonus = 0
+        if consecutive_avoidance > 0:
+            # Recompensa cuadrática por evitaciones consecutivas
+            consecutive_avoidance_bonus = consecutive_avoidance * consecutive_avoidance * 0.5
+        
+        # NUEVO: Bonificación por supervivencia en espacios reducidos
+        confined_space_bonus = 0
+        # Si la serpiente es larga y ha visitado pocas posiciones únicas en proporción
+        if max_snake_length > 5 and unique_positions < total_steps * 0.5:
+            confined_space_bonus = 30  # Bonificación por maniobrar en espacio reducido
+        
+        # Combinar todas las bonificaciones de evitación
+        avoidance_bonus = basic_avoidance + critical_avoidance + consecutive_avoidance_bonus + confined_space_bonus
         
         # COMPONENTE 4: PENALIZACIONES
-        # Penalización por muerte temprana
+        # Penalización por muerte temprana - REEQUILIBRADO
+        # Reemplazamos la penalización fija con una gradual
         early_death_penalty = 0
         if total_score == 0:  # No comió nada
-            early_death_penalty = 300  # Aumentada para penalizar más fuertemente no comer nada
-        elif total_steps < 30:  # Muerte muy temprana
-            early_death_penalty = 200
+            # Penalización proporcional a cuánto tiempo le faltó para llegar a 100 pasos
+            early_death_penalty = 200 * (1 - min(1.0, total_steps/100))
+        elif total_steps < 50:  # Muerte temprana pero comió algo
+            # Penalización menor si al menos comió algo
+            early_death_penalty = 100 * (1 - min(1.0, total_steps/50))
         
-        # Penalización por movimientos repetitivos
-        repetition_penalty = repeated_cycles * 8  # Aumentado para penalizar más los ciclos
+        # Penalización por movimientos repetitivos - REEQUILIBRADO
+        # Penalización exponencial para ciclos prolongados
+        repetition_penalty = 0
+        if repeated_cycles > 0:
+            # Penalización crece exponencialmente con el número de ciclos
+            repetition_penalty = 5 * (repeated_cycles ** 1.5)
         
         # CÁLCULO FINAL CON PONDERACIONES OPTIMIZADAS
         fitness = (
-            food_points +                  # Prioridad máxima a comer comida
-            survival_points +              # Valor bajo a la supervivencia
-            route_efficiency * 4.0 +       # Máxima importancia a la eficiencia
-            food_approach_bonus +          # Premiar acercarse a la comida
-            direct_path_bonus * 2.5 +      # Premiar rutas directas
-            exploration_bonus +            # Valor bajo a la exploración general
-            avoidance_bonus +              # Premiar evitar obstáculos
-            (movement_efficiency * 1.0) -  # Valor bajo al movimiento general
-            early_death_penalty -          # Fuerte penalización por muerte temprana
-            repetition_penalty             # Alta penalización por ciclos repetitivos
+            food_points +                   # Valor de comida (ahora más equilibrado)
+            survival_points +               # Valor de supervivencia (incrementado)
+            route_efficiency * 2.0 +        # Eficiencia de ruta (reducido de 4.0 a 2.0)
+            food_points_per_step * 2.0 +    # Nueva métrica de eficiencia
+            food_approach_bonus +           # Aproximación a comida
+            food_consistency_bonus +        # NUEVO: Consistencia entre juegos
+            direct_path_bonus * 2.0 +       # Dirección hacia comida (ligeramente reducido)
+            exploration_bonus +             # Exploración
+            avoidance_bonus +               # Evitación de obstáculos (significativamente aumentado)
+            (movement_efficiency * 1.0) -   # Eficiencia de movimiento
+            early_death_penalty -           # Penalización gradual por muerte temprana
+            repetition_penalty              # Penalización por ciclos (ahora exponencial)
         )
+        
+        # Variables adicionales que se deben inicializar antes del bucle principal
+        consecutive_avoidance = 0           # Para rastrear evitaciones consecutivas
+        foods_per_game = []                 # Para rastrear comida por juego
         
         # Resumen de la evaluación
         if not silent:
-            print("\n" + "="*50)
+            print("\n" + "="*60)
             print(f"RESUMEN DE EVALUACIÓN DEL AGENTE")
             print(f"  • Total de comida encontrada: {total_score}")
             print(f"  • Total de pasos realizados: {total_steps}")
@@ -785,8 +874,18 @@ class GeneticAlgorithm:
             if avg_steps_per_food:
                 print(f"  • Promedio de pasos por comida: {sum(avg_steps_per_food) / len(avg_steps_per_food):.2f}")
             print(f"  • Posiciones únicas visitadas: {unique_positions}")
+            
+            # Mostrar desgloses de la nueva función de fitness
+            print(f"  • Puntos por comida: {food_points:.2f}")
+            print(f"  • Puntos por supervivencia: {survival_points:.2f}")
+            print(f"  • Bonificación por evitación de obstáculos: {avoidance_bonus:.2f}")
+            print(f"  • Penalización por muerte temprana: {early_death_penalty:.2f}")
+            print(f"  • Penalización por ciclos repetitivos: {repetition_penalty:.2f}")
+            if food_consistency_bonus > 0:
+                print(f"  • Bonificación por consistencia: {food_consistency_bonus:.2f}")
+            
             print(f"  • Fitness calculado: {fitness:.2f}")
-            print("="*50)
+            print("="*60)
         
         # Restaurar variables de entorno si las modificamos
         if os_environ_copy is not None:
@@ -794,29 +893,78 @@ class GeneticAlgorithm:
             os.environ.update(os_environ_copy)
             
         # Garantizar un valor mínimo positivo para mantener diversidad genética
-        fitness = max(1.0, fitness / exact_games)
+        fitness = max(1.0, fitness / num_games)
         
         return fitness
     
     def selection(self, fitnesses):
-        """Selecciona padres usando método de ruleta"""
-        # Normalizar fitness (todos positivos sumando una constante si hay negativos)
-        min_fitness = min(fitnesses)
-        if min_fitness < 0:
-            adjusted_fitnesses = [f - min_fitness + 1 for f in fitnesses]
-        else:
-            adjusted_fitnesses = fitnesses
-            
-        # Calcular probabilidades
-        total_fitness = sum(adjusted_fitnesses)
-        if total_fitness == 0:
-            # Si todos tienen 0, selección aleatoria uniforme
-            probabilities = [1/len(adjusted_fitnesses) for _ in adjusted_fitnesses]
-        else:
-            probabilities = [f/total_fitness for f in adjusted_fitnesses]
+        """
+        Selecciona padres utilizando selección por torneo con características
+        adaptativas para mantener diversidad genética.
+        """
+        # Ajustar dinámicamente el tamaño del torneo basado en diversidad y estancamiento
+        if self.stagnation_counter > 5:
+            # Reducir tamaño de torneo para disminuir presión selectiva y preservar diversidad
+            self.tournament_size = max(3, self.tournament_size - 1)
+        elif len(self.improvement_rate_history) > 2 and sum(self.improvement_rate_history[-2:]) > 0.05:
+            # Aumentar tamaño de torneo cuando hay mejoras consistentes
+            self.tournament_size = min(8, self.tournament_size + 1)
         
-        # Seleccionar dos padres
-        selected_indices = np.random.choice(len(self.population), size=2, p=probabilities)
+        selected_indices = []
+        
+        # Selección ocasional puramente aleatoria para mantener diversidad (10% de probabilidad)
+        if random.random() < 0.1:
+            # Selección totalmente aleatoria
+            selected_indices = random.sample(range(len(self.population)), 2)
+        else:
+            # Primer torneo - enfocado en calidad
+            for _ in range(2):  # Seleccionar dos padres
+                # Seleccionar individuos aleatorios para el torneo
+                tournament = random.sample(range(len(self.population)), self.tournament_size)
+                
+                # Comprobar si necesitamos aplicar compartición de fitness
+                need_sharing = self.stagnation_counter > 3 and random.random() < 0.7
+                
+                if need_sharing:
+                    # Aplicar compartición de fitness para penalizar individuos similares o sobrerepresentados
+                    adjusted_fitnesses = []
+                    for idx in tournament:
+                        # Penalizar basado en número de descendientes que ya ha tenido
+                        offspring_penalty = self.offspring_count.get(idx, 0) * 0.1
+                        
+                        # Penalizar similitud con otros individuos seleccionados
+                        similarity_penalty = 0
+                        if len(selected_indices) > 0:
+                            # Si ya seleccionamos un padre, añadir penalización por similitud
+                            first_parent = self.population[selected_indices[0]]
+                            current = self.population[idx]
+                            # Calcular similitud basada en pesos (distancia euclidiana normalizada)
+                            diff = np.sum((first_parent.weights - current.weights)**2)
+                            similarity = 1.0 / (1.0 + diff)  # Mayor similitud = mayor penalización
+                            similarity_penalty = similarity * 0.3 * fitnesses[idx]
+                        
+                        # Fitness ajustado final
+                        adjusted_fitness = fitnesses[idx] - offspring_penalty - similarity_penalty
+                        adjusted_fitnesses.append(adjusted_fitness)
+                    
+                    # Seleccionar el mejor individuo del torneo con fitness ajustado
+                    best_idx = tournament[np.argmax(adjusted_fitnesses)]
+                else:
+                    # Selección normal por torneo - elegir el mejor fitness
+                    best_idx = tournament[np.argmax([fitnesses[i] for i in tournament])]
+                
+                selected_indices.append(best_idx)
+                
+                # Actualizar contador de descendientes
+                self.offspring_count[best_idx] = self.offspring_count.get(best_idx, 0) + 1
+        
+        # Asegurar que no se seleccione dos veces el mismo individuo
+        if selected_indices[0] == selected_indices[1]:
+            # Reemplazar el segundo índice con otro individuo aleatorio distinto
+            candidates = [i for i in range(len(self.population)) if i != selected_indices[0]]
+            if candidates:
+                selected_indices[1] = random.choice(candidates)
+        
         return selected_indices
     
     def crossover(self, parent1, parent2):
@@ -881,19 +1029,91 @@ class GeneticAlgorithm:
             return DecisionTable(np.copy(parent1.weights))
     
     def mutate(self, agent):
-        """Aplica mutación al agente con mayor variabilidad para evitar mínimos locales"""
+        """
+        Aplica mutación adaptativa al agente con tasas variables según la parte
+        de la tabla de decisión, estancamiento y progreso evolutivo.
+        
+        Args:
+            agent: Agente a mutar
+            
+        Returns:
+            DecisionTable: Agente mutado
+        """
         child_weights = np.copy(agent.weights)
         rows, cols = child_weights.shape
         
+        # 1. Tasa base que disminuye gradualmente con las generaciones
+        # Calculamos el progreso de evolución normalizado (0 al inicio, 1 al final)
+        if hasattr(self, 'evolve_progress') and self.num_generations > 0:
+            evolution_progress = self.evolve_progress / self.num_generations
+        else:
+            evolution_progress = 0.5  # Valor intermedio por defecto
+            
+        # La tasa base comienza alta y disminuye gradualmente
+        base_rate = self.mutation_rate * (1.0 - evolution_progress * 0.7)
+        
+        # 2. Aumentar significativamente la tasa cuando hay estancamiento
+        stagnation_factor = min(0.5, self.stagnation_counter * 0.1)  # Tope de 50% de aumento
+        
+        # 3. Aplicar factores dinámicos basados en las mejoras recientes
+        recent_improvement = 0
+        if len(self.improvement_rate_history) > 0:
+            # Promedio de mejoras recientes (negativo si empeoró)
+            recent_improvement = sum(self.improvement_rate_history[-3:]) / min(3, len(self.improvement_rate_history))
+        
+        # Si hay mejoras recientes, reducir mutación. Si hay deterioro, aumentarla.
+        improvement_factor = max(-0.2, min(0.2, -recent_improvement))
+        
+        # Combinar factores - el estancamiento siempre aumenta la mutación
+        # mientras que las mejoras pueden reducirla
+        adjusted_rate = base_rate * (1.0 + stagnation_factor + improvement_factor)
+        
+        # Asegurar que la tasa esté dentro de límites razonables
+        adjusted_rate = max(0.01, min(0.8, adjusted_rate))
+        
+        # 4. Diferentes tasas para distintas partes de la tabla de decisión
+        
+        # Dividir la tabla en secciones funcionales
+        # Filas 0-2: Detección de peligros - requiere alta precisión, baja mutación
+        # Filas 3-6: Dirección actual - requiere estabilidad, baja mutación
+        # Filas 7-10: Ubicación de comida - más flexible, mutación moderada
+        # Filas 11-14: Distancias a bordes - más flexible, mutación moderada
+        # Filas 15-17: Info avanzada comida - crítica para optimización, mutación adaptable
+        section_rates = {
+            'danger': adjusted_rate * 0.5,       # Menor tasa para pesos de detección peligro
+            'direction': adjusted_rate * 0.6,     # Menor tasa para pesos de dirección
+            'food_location': adjusted_rate * 1.2, # Mayor tasa para pesos de ubicación comida
+            'borders': adjusted_rate * 1.0,       # Tasa normal para distancias a bordes
+            'food_advanced': adjusted_rate * 1.3  # Mayor tasa para info avanzada de comida
+        }
+        
+        # Aplicar mutación con tasas diferenciadas por sección
         for i in range(rows):
+            # Determinar la sección a la que pertenece esta fila
+            if i <= 2:
+                section_rate = section_rates['danger']
+            elif i <= 6:
+                section_rate = section_rates['direction']
+            elif i <= 10:
+                section_rate = section_rates['food_location']
+            elif i <= 14:
+                section_rate = section_rates['borders']
+            else:
+                section_rate = section_rates['food_advanced']
+                
             for j in range(cols):
-                if random.random() < self.mutation_rate:
-                    # Añadir ruido gaussiano con mayor desviación (0.8 en vez de 0.5)
-                    # para promover más exploración y evitar comportamientos repetitivos
-                    child_weights[i][j] += np.random.normal(0, 0.8)
+                if random.random() < section_rate:
+                    # Magnitud de mutación también adaptativa 
+                    # - Mayor para secciones con alta tasa
+                    # - Mayor cuando hay estancamiento
+                    mutation_magnitude = 0.6 + stagnation_factor * 0.4
                     
-                    # 10% de probabilidad de mutación más drástica para salir de mínimos locales
-                    if random.random() < 0.1:
+                    # Añadir ruido gaussiano con magnitud adaptativa
+                    child_weights[i][j] += np.random.normal(0, mutation_magnitude)
+                    
+                    # Probabilidad de mutación más drástica basada en estancamiento
+                    drastic_prob = 0.1 + stagnation_factor * 0.2
+                    if random.random() < drastic_prob:
                         # Mutación más agresiva (cambio de signo o reemplazo total)
                         if random.random() < 0.5:
                             # Cambiar signo
@@ -902,6 +1122,7 @@ class GeneticAlgorithm:
                             # Valor completamente nuevo
                             child_weights[i][j] = np.random.normal(0, 1.5)
         
+        # Retornar agente mutado
         return DecisionTable(child_weights)
     
     def evolve(self, show_progress=True):
@@ -910,8 +1131,19 @@ class GeneticAlgorithm:
         if not self.population:
             self.initialize_population()
         
+        # Reiniciar variables para seguimiento
+        self.best_fitness_history = []
+        self.avg_fitness_history = []
+        self.stagnation_counter = 0
+        self.improvement_rate_history = []
+        self.best_fitness_ever = 0
+        self.offspring_count = {}
+        
         # Para cada generación
         for generation in range(self.num_generations):
+            # Guardar progreso actual para cálculos de mutación adaptativa
+            self.evolve_progress = generation
+            
             # Evaluar fitness
             fitnesses = [self.fitness(agent) for agent in self.population]
             
@@ -920,25 +1152,58 @@ class GeneticAlgorithm:
             best_fitness = fitnesses[max_fitness_idx]
             best_agent = self.population[max_fitness_idx]
             
+            # Calcular tasa de mejora respecto a generación anterior
+            if len(self.best_fitness_history) > 0:
+                prev_best = self.best_fitness_history[-1]
+                improvement_rate = (best_fitness - prev_best) / (prev_best + 0.01)  # Evitar división por cero
+                self.improvement_rate_history.append(improvement_rate)
+                
+                # Actualizar contador de estancamiento
+                if best_fitness > self.best_fitness_ever * 1.01:  # Mejora de al menos 1%
+                    self.best_fitness_ever = best_fitness
+                    self.stagnation_counter = 0
+                else:
+                    self.stagnation_counter += 1
+            else:
+                # Inicializar en la primera generación
+                self.best_fitness_ever = best_fitness
+                self.improvement_rate_history.append(0.0)
+            
             # Guardar estadísticas
             self.best_fitness_history.append(best_fitness)
             self.avg_fitness_history.append(sum(fitnesses) / len(fitnesses))
             
             if show_progress and generation % 5 == 0:
                 print(f"Generación {generation}: Mejor fitness = {best_fitness}, Promedio = {self.avg_fitness_history[-1]:.2f}")
+                if self.stagnation_counter > 0:
+                    print(f"  Estancamiento: {self.stagnation_counter} generaciones sin mejora significativa")
             
+            # Si es la última generación, terminar
+            if generation == self.num_generations - 1:
+                break
+                
             # Crear nueva población
             new_population = []
             
+            # Reiniciar contador de descendientes para esta generación
+            self.offspring_count = {}
+            
             # Elitismo: pasar los mejores agentes directamente
             sorted_indices = np.argsort(fitnesses)[::-1]
-            for i in range(self.elite_size):
+            
+            # Elitismo adaptativo: más élites durante estancamiento
+            effective_elite_size = self.elite_size
+            if self.stagnation_counter > 5:
+                # Aumentar elitismo para preservar buenas soluciones
+                effective_elite_size = min(self.population_size // 4, self.elite_size * 2)
+            
+            for i in range(effective_elite_size):
                 elite_idx = sorted_indices[i]
                 new_population.append(DecisionTable(np.copy(self.population[elite_idx].weights)))
             
             # Generar el resto de la población mediante selección, cruce y mutación
             while len(new_population) < self.population_size:
-                # Selección
+                # Selección con método de torneo adaptativo
                 parent_indices = self.selection(fitnesses)
                 parent1 = self.population[parent_indices[0]]
                 parent2 = self.population[parent_indices[1]]
@@ -946,7 +1211,7 @@ class GeneticAlgorithm:
                 # Cruce
                 child = self.crossover(parent1, parent2)
                 
-                # Mutación
+                # Mutación adaptativa con tasas variables
                 child = self.mutate(child)
                 
                 # Agregar a nueva población
