@@ -1,4 +1,4 @@
-#!/Users/sebastiancruz/Desktop/Snake/venv/bin/python3
+#!/Users/sebastiancruz/Desktop/Snake-Evolutivo-Algoritmo-Genetico/venv/bin/python3.12
 # -*- coding: utf-8 -*-
 import re
 import sys

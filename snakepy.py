@@ -1,4 +1,4 @@
-# Base de Snake con algoritmo genético
+# Base Snake
 
 import random
 import numpy as np
@@ -68,7 +68,7 @@ class SnakeGame:
         self.reset()
         
     def reset(self):
-        # Reinicia juego
+        # Reset
         self.direction = Direction.RIGHT
         
         x_mid = (self.grid_width // 2) * BLOCK_SIZE
@@ -96,7 +96,7 @@ class SnakeGame:
         return self.get_state()
 
     def _place_food(self):
-        # Coloca comida aleatoria
+        # Comida
         max_x = (self.w // BLOCK_SIZE) - 1
         max_y = (self.h // BLOCK_SIZE) - 1
         
@@ -168,7 +168,7 @@ class SnakeGame:
         return game_over, self.score, reward
         
     def _change_direction(self, action):
-        # Cambia dirección según acción
+        # Dirección
         clockwise = [Direction.RIGHT, Direction.DOWN, Direction.LEFT, Direction.UP]
         idx = clockwise.index(self.direction)
         
@@ -184,7 +184,7 @@ class SnakeGame:
         self.direction = new_dir
 
     def _is_collision(self, pt=None):
-        # Verifica colisión
+        # Colisión
         if pt is None:
             pt = self.head
             
@@ -203,7 +203,7 @@ class SnakeGame:
         return False
         
     def is_collision_at(self, x, y):
-        # Verifica colisión en (x,y)
+        # Colisión en (x,y)
         pt = Point(x, y)
         return self._is_collision(pt=pt)
 
@@ -225,7 +225,7 @@ class SnakeGame:
             pygame.display.flip()
 
     def _move(self, direction):
-        # Mueve cabeza
+        # Movimiento
         x = self.head.x
         y = self.head.y
         if direction == Direction.RIGHT:
@@ -240,7 +240,7 @@ class SnakeGame:
         self.head = Point(x, y)
         
     def get_state(self):
-        # Obtiene sensores para IA
+        # Sensores
         head = self.head
         
         point_r = Point(head.x + BLOCK_SIZE, head.y)
@@ -299,7 +299,7 @@ class SnakeGame:
             head.y / self.h,
             (self.h - head.y) / self.h,
             
-            # Info adicional comida
+            # Info comida
             moving_toward_food,
             1.0 - food_dist_x,
             1.0 - food_dist_y,
@@ -309,7 +309,7 @@ class SnakeGame:
 
 class DecisionTable:
     def __init__(self, weights=None):
-        # Tabla decisión: 18 sensores x 3 acciones
+        # Tabla decisión
         if weights is None:
             self.weights = np.random.randn(18, 3)
             
@@ -326,12 +326,12 @@ class DecisionTable:
         else:
             self.weights = weights
         
-        # Historial para ciclos
+        # Historial ciclos
         self.recent_actions = []
         self.max_history = 8
     
     def get_action(self, state):
-        # Determina acción según estado
+        # Determinar acción
         q_values = np.dot(state, self.weights)
         
         has_cycle = self._check_for_cycles()
@@ -344,7 +344,7 @@ class DecisionTable:
         if danger_ahead > 0.5:
             q_values[0] = -100
             
-        # Dirección óptima hacia comida
+        # Dirección comida
         best_dir_to_food = -1
         if moving_direction[0] and food_direction[0]:
             best_dir_to_food = 0
@@ -364,7 +364,7 @@ class DecisionTable:
         elif food_direction[3] and (moving_direction[0] or moving_direction[1]):
             best_dir_to_food = 2 if moving_direction[0] else 1
         
-        # Bonus por ir hacia comida
+        # Bonus comida
         if best_dir_to_food >= 0 and random.random() < 0.8:
             if (best_dir_to_food == 0 and not danger_ahead) or \
                (best_dir_to_food == 1 and not state[1]) or \
@@ -385,17 +385,17 @@ class DecisionTable:
         return action
     
     def _update_action_history(self, action):
-        # Actualiza historial acciones
+        # Historial acciones
         self.recent_actions.append(action)
         if len(self.recent_actions) > self.max_history:
             self.recent_actions.pop(0)
     
     def _check_for_cycles(self):
-        # Detecta ciclos
+        # Detectar ciclos
         if len(self.recent_actions) < 6:
             return False
         
-        # Ciclos 2 acciones
+        # Ciclo 2 acciones
         if len(self.recent_actions) >= 6:
             pattern = self.recent_actions[-2:]
             previous = self.recent_actions[-4:-2]
@@ -403,7 +403,7 @@ class DecisionTable:
             if pattern == previous and pattern == older:
                 return True
         
-        # Ciclos 3 acciones
+        # Ciclo 3 acciones
         if len(self.recent_actions) >= 6:
             pattern = self.recent_actions[-3:]
             previous = self.recent_actions[-6:-3]
@@ -413,7 +413,7 @@ class DecisionTable:
         return False
 
     def crossover(self, other):
-        # Cruce entre tablas
+        # Cruce
         child_weights = np.copy(self.weights)
         
         rows, cols = self.weights.shape
@@ -462,11 +462,11 @@ class GeneticAlgorithm:
         self.diversity_threshold = 0.1
         
     def initialize_population(self):
-        # Inicializa población
+        # Inicializar población
         self.population = [DecisionTable() for _ in range(self.population_size)]
     
     def fitness(self, agent, num_games=7, show_game=False, silent=False):
-        # Evalúa fitness del agente
+        # Evaluar fitness
         total_score = 0
         total_steps = 0
         movement_efficiency = 0
@@ -478,7 +478,7 @@ class GeneticAlgorithm:
         consecutive_avoidance = 0
         max_snake_length = 3
         
-        # Semillas para evaluación consistente
+        # Semillas 
         base_seed = 42
         seeds = [base_seed + i * 1000 for i in range(num_games)]
         
@@ -750,7 +750,7 @@ class GeneticAlgorithm:
         return fitness
     
     def selection(self, fitnesses):
-        # Selección de padres
+        # Selección padres
         if self.stagnation_counter > 5:
             self.tournament_size = max(3, self.tournament_size - 1)
         elif len(self.improvement_rate_history) > 2 and sum(self.improvement_rate_history[-2:]) > 0.05:
@@ -798,7 +798,7 @@ class GeneticAlgorithm:
         return selected_indices
     
     def crossover(self, parent1, parent2):
-        # Cruce entre padres
+        # Cruce padres
         if random.random() < self.crossover_rate:
             crossover_type = getattr(self, 'crossover_type', 'one_point')
             
@@ -908,7 +908,7 @@ class GeneticAlgorithm:
         return DecisionTable(child_weights)
     
     def evolve(self, show_progress=True):
-        # Evoluciona población
+        # Evolución
         if not self.population:
             self.initialize_population()
         
@@ -986,7 +986,7 @@ class GeneticAlgorithm:
         return self.population[best_idx]
     
     def plot_fitness_history(self):
-        # Grafica evolución fitness
+        # Gráfica fitness
         plt.figure(figsize=(12, 6))
         plt.plot(self.best_fitness_history, label='Mejor Fitness')
         plt.plot(self.avg_fitness_history, label='Fitness Promedio')
