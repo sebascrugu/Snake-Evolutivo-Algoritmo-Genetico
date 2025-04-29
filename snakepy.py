@@ -44,7 +44,7 @@ BOARD_SIZE = (20, 20)
 
 class SnakeGame:
 
-    def __init__(self, width=None, height=None, ai_control=False, training_mode=False, headless=False):
+    def __init__(self, width=None, height=None, ai_control=False, headless=False):
         if width is None or height is None:
             self.grid_width, self.grid_height = BOARD_SIZE
             self.w = self.grid_width * BLOCK_SIZE
@@ -55,7 +55,6 @@ class SnakeGame:
             self.h = self.grid_height * BLOCK_SIZE
             
         self.ai_control = ai_control
-        self.training_mode = training_mode
         self.headless = headless
         
         if not headless:
@@ -501,7 +500,7 @@ class GeneticAlgorithm:
                     pass
                 builtins.print = silent_print
             
-            game = SnakeGame(ai_control=True, training_mode=False, headless=silent)
+            game = SnakeGame(ai_control=True, headless=silent)
             done = False
             score = 0
             steps_since_last_food = 0
@@ -871,6 +870,22 @@ class GeneticAlgorithm:
         
         adjusted_rate = max(0.01, min(0.8, adjusted_rate))
         
+        #Adaptación avanzada
+        if getattr(self, 'adaptive_mutation', False):
+            # Si el fitness está mejorando, reduce la mutación
+            if len(self.improvement_rate_history) > 5 and sum(self.improvement_rate_history[-5:]) > 0:
+                adjusted_rate *= 0.8
+                # Enfoque en secciones críticas
+                critical_focus = True
+            # Si hay estancamiento, aumenta dramáticamente
+            elif self.stagnation_counter > 3:
+                boost_factor = 1 + min(1.0, self.stagnation_counter * 0.15)
+                adjusted_rate *= boost_factor
+                # Desenfoque en secciones críticas para explorar
+                critical_focus = False
+        else:
+            critical_focus = False
+        
         # Tasas por sección
         section_rates = {
             'danger': adjusted_rate * 0.5,
@@ -926,7 +941,6 @@ class GeneticAlgorithm:
             
             max_fitness_idx = np.argmax(fitnesses)
             best_fitness = fitnesses[max_fitness_idx]
-            best_agent = self.population[max_fitness_idx]
             
             if len(self.best_fitness_history) > 0:
                 prev_best = self.best_fitness_history[-1]
@@ -1000,7 +1014,7 @@ class GeneticAlgorithm:
 
 def play_human():
     # Juego manual
-    game = SnakeGame(ai_control=False, training_mode=False)
+    game = SnakeGame(ai_control=False)
     
     while True:
         game_over, score, _ = game.play_step()

@@ -8,11 +8,9 @@ import matplotlib.pyplot as plt
 import time
 import random
 import os
-from matplotlib.ticker import MaxNLocator
 from snakepy import GeneticAlgorithm, DecisionTable, Action, Direction, Point, SnakeGame
 from snakepy import BLOCK_SIZE
 from joblib import Parallel, delayed
-import multiprocessing as mp
 import seaborn as sns
 
 # Colores
@@ -105,7 +103,6 @@ def run_experiment(config, shared_results, experiment_index):
     
     stagnation_counter = 0
     best_fitness_ever = 0
-    best_agent_ever = None
     
     # Evolución
     for generation in range(generations):
@@ -127,7 +124,6 @@ def run_experiment(config, shared_results, experiment_index):
         
         if best_fitness > best_fitness_ever:
             best_fitness_ever = best_fitness
-            best_agent_ever = sorted_population[0]
         
         # Estancamiento
         if history['previous_best'] is not None:
@@ -154,7 +150,7 @@ def run_experiment(config, shared_results, experiment_index):
             random.seed(eval_seed)
             np.random.seed(eval_seed)
             
-            game = SnakeGame(ai_control=True, training_mode=False, headless=True)
+            game = SnakeGame(ai_control=True, headless=True)
             done = False
             score = 0
             steps = 0
@@ -217,7 +213,7 @@ def run_experiment(config, shared_results, experiment_index):
                 random.seed(eval_seed)
                 np.random.seed(eval_seed)
                 
-                game = SnakeGame(ai_control=True, training_mode=False, headless=True)
+                game = SnakeGame(ai_control=True, headless=True)
                 done = False
                 food_eaten = 0
                 steps = 0
@@ -460,14 +456,6 @@ def run_experiments():
     experiment_configs = [
         {
             'name': 'Experimento 1',
-            'pop_size': 40,
-            'generations': 100,
-            'mutation_rate': 0.25,
-            'elitism': 10,
-            'base_seed': (int(time.time()) % 10000) + 10000
-        },
-        {
-            'name': 'Experimento 2',
             'pop_size': 50,
             'generations': 100,
             'mutation_rate': 0.35,
@@ -475,12 +463,20 @@ def run_experiments():
             'base_seed': int(time.time()) % 10000
         },
         {
-            'name': 'Experimento 3',
+            'name': 'Experimento 2',
             'pop_size': 60,
             'generations': 100,
             'mutation_rate': 0.45,
             'elitism': 4,
             'base_seed': (int(time.time()) % 10000) + 5000
+        },
+        {
+            'name': 'Experimento 3',
+            'pop_size': 40,
+            'generations': 100,
+            'mutation_rate': 0.25,
+            'elitism': 10,
+            'base_seed': (int(time.time()) % 10000) + 10000
         }
     ]
     
